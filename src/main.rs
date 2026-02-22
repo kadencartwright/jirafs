@@ -1,154 +1,49 @@
-use std::ffi::OsStr;
-use std::time::{Duration, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::Duration;
 
-use fuser::{
-    Config, Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags, Generation, INodeNo,
-    MountOption, OpenAccMode, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    ReplyOpen, Request,
-};
+use fs_jira::cache::InMemoryCache;
+use fs_jira::fs::JiraFuseFs;
+use fs_jira::jira::JiraClient;
+use fs_jira::logging;
+use fs_jira::metrics::{spawn_metrics_logger, Metrics};
+use fs_jira::warmup::{seed_project_listings, warm_recent_issues};
+use fuser::{Config, MountOption};
 
-const ROOT_INO: INodeNo = INodeNo::ROOT;
-const TEST_INO: INodeNo = INodeNo(2);
-const TEST_NAME: &str = "test.md";
-const TEST_CONTENT: &[u8] = b"Hello World!\n";
-const TTL: Duration = Duration::from_secs(1);
-
-struct BootstrapFs {
-    uid: u32,
-    gid: u32,
+fn required_env(name: &str) -> Result<String, Box<dyn std::error::Error>> {
+    std::env::var(name).map_err(|_| format!("missing required environment variable: {name}").into())
 }
 
-impl BootstrapFs {
-    fn root_attr(&self) -> FileAttr {
-        FileAttr {
-            ino: ROOT_INO,
-            size: 0,
-            blocks: 0,
-            atime: UNIX_EPOCH,
-            mtime: UNIX_EPOCH,
-            ctime: UNIX_EPOCH,
-            crtime: UNIX_EPOCH,
-            kind: FileType::Directory,
-            perm: 0o555,
-            nlink: 2,
-            uid: self.uid,
-            gid: self.gid,
-            rdev: 0,
-            flags: 0,
-            blksize: 512,
-        }
-    }
+fn parse_projects(raw: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let projects: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .collect();
 
-    fn test_attr(&self) -> FileAttr {
-        FileAttr {
-            ino: TEST_INO,
-            size: TEST_CONTENT.len() as u64,
-            blocks: 1,
-            atime: UNIX_EPOCH,
-            mtime: UNIX_EPOCH,
-            ctime: UNIX_EPOCH,
-            crtime: UNIX_EPOCH,
-            kind: FileType::RegularFile,
-            perm: 0o444,
-            nlink: 1,
-            uid: self.uid,
-            gid: self.gid,
-            rdev: 0,
-            flags: 0,
-            blksize: 512,
-        }
+    if projects.is_empty() {
+        return Err("JIRA_PROJECTS must contain at least one project key".into());
     }
+    Ok(projects)
 }
 
-impl Filesystem for BootstrapFs {
-    fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
-        if parent == ROOT_INO && name == OsStr::new(TEST_NAME) {
-            reply.entry(&TTL, &self.test_attr(), Generation(0));
-            return;
-        }
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
 
-        reply.error(Errno::ENOENT);
-    }
-
-    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
-        match ino {
-            ROOT_INO => reply.attr(&TTL, &self.root_attr()),
-            TEST_INO => reply.attr(&TTL, &self.test_attr()),
-            _ => reply.error(Errno::ENOENT),
-        }
-    }
-
-    fn readdir(
-        &self,
-        _req: &Request,
-        ino: INodeNo,
-        _fh: FileHandle,
-        offset: u64,
-        mut reply: ReplyDirectory,
-    ) {
-        if ino != ROOT_INO {
-            reply.error(Errno::ENOENT);
-            return;
-        }
-
-        let entries = [
-            (ROOT_INO, FileType::Directory, "."),
-            (ROOT_INO, FileType::Directory, ".."),
-            (TEST_INO, FileType::RegularFile, TEST_NAME),
-        ];
-
-        for (idx, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
-            let next_offset = (idx + 1) as u64;
-            if reply.add(*entry_ino, next_offset, *kind, name) {
-                break;
-            }
-        }
-
-        reply.ok();
-    }
-
-    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
-        if ino != TEST_INO {
-            reply.error(Errno::ENOENT);
-            return;
-        }
-
-        if flags.acc_mode() != OpenAccMode::O_RDONLY {
-            reply.error(Errno::EROFS);
-            return;
-        }
-
-        reply.opened(FileHandle(0), FopenFlags::empty());
-    }
-
-    fn read(
-        &self,
-        _req: &Request,
-        ino: INodeNo,
-        _fh: FileHandle,
-        offset: u64,
-        size: u32,
-        _flags: OpenFlags,
-        _lock_owner: Option<fuser::LockOwner>,
-        reply: ReplyData,
-    ) {
-        if ino != TEST_INO {
-            reply.error(Errno::ENOENT);
-            return;
-        }
-
-        let start = offset as usize;
-        if start >= TEST_CONTENT.len() {
-            reply.data(&[]);
-            return;
-        }
-
-        let end = start.saturating_add(size as usize).min(TEST_CONTENT.len());
-        reply.data(&TEST_CONTENT[start..end]);
-    }
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = dotenvy::dotenv();
+
     let mut args = std::env::args_os();
     let _program = args.next();
     let mountpoint = match args.next() {
@@ -157,11 +52,97 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err("usage: cargo run -- <mountpoint>".into());
         }
     };
+    let mountpoint_path = std::path::PathBuf::from(&mountpoint);
+    if !mountpoint_path.exists() {
+        std::fs::create_dir_all(&mountpoint_path)?;
+        logging::info(format!(
+            "created missing mountpoint {}",
+            mountpoint_path.display()
+        ));
+    }
 
-    let fs = BootstrapFs {
-        uid: unsafe { libc::geteuid() },
-        gid: unsafe { libc::getegid() },
+    let base_url = required_env("JIRA_BASE_URL")?;
+    let email = required_env("JIRA_EMAIL")?;
+    let token = required_env("JIRA_API_TOKEN")?;
+    let projects = parse_projects(&required_env("JIRA_PROJECTS")?)?;
+    let ttl_secs = env_u64("JIRA_CACHE_TTL_SECS", 30);
+    let metrics_interval_secs = env_u64("FS_JIRA_METRICS_INTERVAL_SECS", 60);
+    let warmup_budget = env_usize("FS_JIRA_WARMUP_BUDGET", 0);
+    let metrics = Arc::new(Metrics::new());
+
+    logging::info(format!(
+        "starting fs-jira projects={} ttl={}s warmup_budget={}",
+        projects.join(","),
+        ttl_secs,
+        warmup_budget
+    ));
+
+    spawn_metrics_logger(
+        Arc::clone(&metrics),
+        Duration::from_secs(metrics_interval_secs.max(1)),
+    );
+
+    let jira = Arc::new(JiraClient::new_with_metrics(
+        base_url,
+        email,
+        token,
+        Arc::clone(&metrics),
+    )?);
+    logging::info(format!("using jira base url {}", jira.base_url));
+
+    match jira.get_myself() {
+        Ok(me) => {
+            logging::info(format!(
+                "jira identity display_name={:?} account_id={:?} email={:?}",
+                me.display_name, me.account_id, me.email_address
+            ));
+        }
+        Err(err) => logging::warn(format!("failed jira identity probe: {}", err)),
+    }
+
+    match jira.list_visible_projects() {
+        Ok(project_keys) => {
+            logging::info(format!(
+                "jira visible projects count={} sample={:?}",
+                project_keys.len(),
+                project_keys.iter().take(10).collect::<Vec<_>>()
+            ));
+        }
+        Err(err) => logging::warn(format!("failed visible projects probe: {}", err)),
+    }
+
+    let cache = if let Ok(path) = std::env::var("FS_JIRA_CACHE_DB") {
+        logging::info(format!("persistent cache enabled at {}", path));
+        Arc::new(InMemoryCache::with_persistence(
+            Duration::from_secs(ttl_secs),
+            Duration::from_secs(ttl_secs),
+            std::path::Path::new(&path),
+            Arc::clone(&metrics),
+        )?)
+    } else {
+        logging::info("persistent cache disabled");
+        Arc::new(InMemoryCache::new(
+            Duration::from_secs(ttl_secs),
+            Duration::from_secs(ttl_secs),
+            Arc::clone(&metrics),
+        ))
     };
+
+    let seeded_projects = seed_project_listings(&jira, &cache, &projects);
+    logging::info(format!("seeded {} project listings", seeded_projects));
+
+    if warmup_budget > 0 {
+        let warmed = warm_recent_issues(&jira, &cache, &projects, warmup_budget);
+        logging::info(format!("warmup loaded {} issues", warmed));
+    }
+
+    let fs = JiraFuseFs::new(
+        unsafe { libc::geteuid() },
+        unsafe { libc::getegid() },
+        projects,
+        jira,
+        cache,
+    );
 
     let mut config = Config::default();
     config.mount_options.extend([
@@ -170,6 +151,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         MountOption::DefaultPermissions,
     ]);
 
-    fuser::mount2(fs, mountpoint, &config)?;
+    fuser::mount2(fs, mountpoint_path, &config)?;
     Ok(())
 }
