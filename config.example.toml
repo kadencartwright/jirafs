@@ -2,7 +2,12 @@
 base_url = "https://your-domain.atlassian.net"
 email = "you@example.com"
 api_token = "your_api_token_here"
-projects = ["PROJ", "OPS"]
+
+[jira.workspaces.default]
+jql = "project in (PROJ, OPS) ORDER BY updated DESC"
+
+[jira.workspaces.ops]
+jql = "project = OPS ORDER BY updated DESC"
 
 [cache]
 db_path = "/tmp/fs-jira-cache.db"

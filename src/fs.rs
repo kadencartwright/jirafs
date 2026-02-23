@@ -26,26 +26,21 @@ const INO_LAST_FULL_SYNC: INodeNo = INodeNo(0x1005);
 const INO_SECONDS_TO_NEXT: INodeNo = INodeNo(0x1002);
 const INO_MANUAL_REFRESH: INodeNo = INodeNo(0x1003);
 const INO_FULL_REFRESH: INodeNo = INodeNo(0x1004);
-const INO_PROJECTS: INodeNo = INodeNo(0x2000);
-const INO_TICKETS: INodeNo = INodeNo(0x3000);
-const INO_TICKETS_INDEX: INodeNo = INodeNo(0x3001);
+const INO_WORKSPACES: INodeNo = INodeNo(0x2000);
 
 #[derive(Debug, Clone, Copy)]
 enum IssueFileKind {
     Main,
     CommentsMarkdown,
-    CommentsJsonl,
 }
 
 #[derive(Debug, Clone)]
 enum Node {
     Root,
     SyncMeta,
-    Projects,
-    Project { name: String },
+    Workspaces,
+    Workspace { name: String },
     Issue { key: String, kind: IssueFileKind },
-    Tickets,
-    TicketsIndex,
     SyncMetaFile,
 }
 
@@ -58,7 +53,7 @@ struct FsState {
 pub struct JiraFuseFs {
     uid: u32,
     gid: u32,
-    projects: Vec<String>,
+    workspaces: Vec<(String, String)>,
     jira: Arc<JiraClient>,
     cache: Arc<InMemoryCache>,
     sync_budget: usize,
@@ -71,7 +66,7 @@ impl JiraFuseFs {
     pub fn new(
         uid: u32,
         gid: u32,
-        projects: Vec<String>,
+        workspaces: Vec<(String, String)>,
         jira: Arc<JiraClient>,
         cache: Arc<InMemoryCache>,
         sync_budget: usize,
@@ -83,7 +78,7 @@ impl JiraFuseFs {
         Self {
             uid,
             gid,
-            projects,
+            workspaces,
             jira,
             cache,
             sync_budget,
@@ -100,7 +95,7 @@ impl JiraFuseFs {
 
         let jira = Arc::clone(&self.jira);
         let cache = Arc::clone(&self.cache);
-        let projects = self.projects.clone();
+        let workspaces = self.workspaces.clone();
         let sync_budget = self.sync_budget;
         let sync_state = Arc::clone(&self.sync_state);
 
@@ -110,7 +105,7 @@ impl JiraFuseFs {
             }
 
             logging::info("starting initial sync after mount...");
-            let sync_result = sync_issues(&jira, &cache, &projects, sync_budget, false);
+            let sync_result = sync_issues(&jira, &cache, &workspaces, sync_budget, false);
 
             sync_state.mark_sync_complete();
             sync_state.mark_sync_end();
@@ -128,6 +123,13 @@ impl JiraFuseFs {
                 }
             }
         });
+    }
+
+    fn workspace_names(&self) -> Vec<String> {
+        self.workspaces
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 
     fn dir_attr(&self, ino: INodeNo) -> FileAttr {
@@ -170,45 +172,31 @@ impl JiraFuseFs {
         }
     }
 
-    fn project_for_inode(&self, ino: INodeNo) -> Option<String> {
+    fn workspace_for_inode(&self, ino: INodeNo) -> Option<String> {
         let guard = self.state_guard();
-        if let Some(Node::Project { name }) = guard.nodes.get(&ino) {
+        if let Some(Node::Workspace { name }) = guard.nodes.get(&ino) {
             return Some(name.clone());
         }
 
-        self.projects
-            .iter()
-            .find(|project| inode_for_project(project) == ino)
-            .cloned()
+        self.workspace_names()
+            .into_iter()
+            .find(|workspace| inode_for_workspace(workspace) == ino)
     }
 
     fn node_for_inode(&self, ino: INodeNo) -> Option<Node> {
         if ino == INO_SYNC_META {
             return Some(Node::SyncMeta);
         }
-        if ino == INO_PROJECTS {
-            return Some(Node::Projects);
+        if ino == INO_WORKSPACES {
+            return Some(Node::Workspaces);
         }
-        if ino == INO_TICKETS {
-            return Some(Node::Tickets);
-        }
-        if ino == INO_LAST_SYNC {
+        if ino == INO_LAST_SYNC
+            || ino == INO_LAST_FULL_SYNC
+            || ino == INO_SECONDS_TO_NEXT
+            || ino == INO_MANUAL_REFRESH
+            || ino == INO_FULL_REFRESH
+        {
             return Some(Node::SyncMetaFile);
-        }
-        if ino == INO_LAST_FULL_SYNC {
-            return Some(Node::SyncMetaFile);
-        }
-        if ino == INO_SECONDS_TO_NEXT {
-            return Some(Node::SyncMetaFile);
-        }
-        if ino == INO_MANUAL_REFRESH {
-            return Some(Node::SyncMetaFile);
-        }
-        if ino == INO_FULL_REFRESH {
-            return Some(Node::SyncMetaFile);
-        }
-        if ino == INO_TICKETS_INDEX {
-            return Some(Node::TicketsIndex);
         }
 
         self.state_guard().nodes.get(&ino).cloned()
@@ -228,13 +216,13 @@ impl JiraFuseFs {
         }
     }
 
-    fn issue_exists_in_project(&self, project: &str, issue_key: &str) -> Result<bool, Errno> {
-        let issues = self.project_issues(project)?;
+    fn issue_exists_in_workspace(&self, workspace: &str, issue_key: &str) -> Result<bool, Errno> {
+        let issues = self.workspace_issues(workspace)?;
         Ok(issues.iter().any(|i| i.key == issue_key))
     }
 
-    fn project_issues(&self, project: &str) -> Result<Vec<crate::jira::IssueRef>, Errno> {
-        if let Some(snapshot) = self.cache.get_project_issues_snapshot(project) {
+    fn workspace_issues(&self, workspace: &str) -> Result<Vec<crate::jira::IssueRef>, Errno> {
+        if let Some(snapshot) = self.cache.get_workspace_issues_snapshot(workspace) {
             return Ok(snapshot.issues);
         }
 
@@ -242,16 +230,15 @@ impl JiraFuseFs {
     }
 
     fn issue_bytes(&self, issue_key: &str) -> Result<Vec<u8>, Errno> {
-        self.cache.get_issue_markdown_stale_safe(issue_key, || {
-            Err(Errno::EAGAIN)
-        })
-        .or_else(|_| {
-            Ok(format!(
-                "# {}\n\nNot yet available in local cache. Wait for sync interval or trigger manual refresh via `.sync_meta/manual_refresh`.\n",
-                issue_key
-            )
-            .into_bytes())
-        })
+        self.cache
+            .get_issue_markdown_stale_safe(issue_key, || Err(Errno::EAGAIN))
+            .or_else(|_| {
+                Ok(format!(
+                    "# {}\n\nNot yet available in local cache. Wait for sync interval or trigger manual refresh via `.sync_meta/manual_refresh`.\n",
+                    issue_key
+                )
+                .into_bytes())
+            })
     }
 
     fn issue_main_size(&self, issue_key: &str) -> u64 {
@@ -261,26 +248,15 @@ impl JiraFuseFs {
             .unwrap_or(0)
     }
 
-    fn issue_comments_markdown_bytes(&self, issue_key: &str) -> Result<Vec<u8>, Errno> {
+    fn issue_comments_markdown_bytes(&self, issue_key: &str) -> Vec<u8> {
         if let Some(bytes) = self.cache.persistent_comments_md(issue_key) {
-            return Ok(bytes);
+            return bytes;
         }
-        Ok(format!(
+        format!(
             "# {} comments\n\nComments sidecar is only populated during sync.\n",
             issue_key
         )
-        .into_bytes())
-    }
-
-    fn issue_comments_jsonl_bytes(&self, issue_key: &str) -> Result<Vec<u8>, Errno> {
-        if let Some(bytes) = self.cache.persistent_comments_jsonl(issue_key) {
-            return Ok(bytes);
-        }
-        Ok(format!(
-            "{{\"event\":\"comment_sidecar_unavailable\",\"id\":\"{}\",\"reason\":\"populated_on_sync_only\"}}\n",
-            issue_key
-        )
-        .into_bytes())
+        .into_bytes()
     }
 
     fn issue_sidecar_size(&self, issue_key: &str, kind: IssueFileKind) -> u64 {
@@ -290,54 +266,7 @@ impl JiraFuseFs {
                 .cache
                 .persistent_comments_md_len(issue_key)
                 .unwrap_or(64),
-            IssueFileKind::CommentsJsonl => self
-                .cache
-                .persistent_comments_jsonl_len(issue_key)
-                .unwrap_or(96),
         }
-    }
-
-    fn tickets_index_jsonl_bytes(&self) -> Result<Vec<u8>, Errno> {
-        if let Some(rows) = self.cache.list_ticket_index(&self.projects) {
-            let mut out = String::new();
-            for row in rows {
-                let line = serde_json::json!({
-                    "id": row.id,
-                    "project": row.project,
-                    "updated_at": row.updated_at,
-                    "path": row.path,
-                });
-                out.push_str(&line.to_string());
-                out.push('\n');
-            }
-            return Ok(out.into_bytes());
-        }
-
-        let mut rows = Vec::new();
-
-        for project in &self.projects {
-            let Some(snapshot) = self.cache.get_project_issues_snapshot(project) else {
-                continue;
-            };
-            let issues = snapshot.issues;
-
-            for issue in issues {
-                let row = serde_json::json!({
-                    "id": issue.key,
-                    "project": project,
-                    "updated_at": issue.updated,
-                    "path": format!("projects/{}/{}.md", project, issue.key),
-                });
-                rows.push(row.to_string());
-            }
-        }
-
-        rows.sort();
-        let mut out = rows.join("\n");
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        Ok(out.into_bytes())
     }
 
     fn sync_meta_file_content(&self, ino: INodeNo) -> Vec<u8> {
@@ -391,29 +320,8 @@ impl Filesystem for JiraFuseFs {
                 reply.entry(&TTL, &self.dir_attr(INO_SYNC_META), Generation(0));
                 return;
             }
-            if name == OsStr::new("projects") {
-                reply.entry(&TTL, &self.dir_attr(INO_PROJECTS), Generation(0));
-                return;
-            }
-            if name == OsStr::new("tickets") {
-                reply.entry(&TTL, &self.dir_attr(INO_TICKETS), Generation(0));
-                return;
-            }
-            reply.error(Errno::ENOENT);
-            return;
-        }
-
-        if parent == INO_TICKETS {
-            if name == OsStr::new("index.jsonl") {
-                let size = self
-                    .tickets_index_jsonl_bytes()
-                    .map(|v| v.len() as u64)
-                    .unwrap_or(0);
-                reply.entry(
-                    &TTL,
-                    &self.file_attr(INO_TICKETS_INDEX, size, false),
-                    Generation(0),
-                );
+            if name == OsStr::new("workspaces") {
+                reply.entry(&TTL, &self.dir_attr(INO_WORKSPACES), Generation(0));
                 return;
             }
             reply.error(Errno::ENOENT);
@@ -470,13 +378,17 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        if parent == INO_PROJECTS {
-            if let Some(project) = self.projects.iter().find(|p| name == OsStr::new(p)) {
-                let ino = inode_for_project(project);
+        if parent == INO_WORKSPACES {
+            if let Some(workspace) = self
+                .workspace_names()
+                .iter()
+                .find(|w| name == OsStr::new(w))
+            {
+                let ino = inode_for_workspace(workspace);
                 self.upsert_node(
                     ino,
-                    Node::Project {
-                        name: project.to_string(),
+                    Node::Workspace {
+                        name: workspace.to_string(),
                     },
                 );
                 reply.entry(&TTL, &self.dir_attr(ino), Generation(0));
@@ -486,7 +398,7 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        let Some(project) = self.project_for_inode(parent) else {
+        let Some(workspace) = self.workspace_for_inode(parent) else {
             reply.error(Errno::ENOENT);
             return;
         };
@@ -496,9 +408,7 @@ impl Filesystem for JiraFuseFs {
             return;
         };
 
-        let (issue_key, kind) = if let Some(value) = file_name.strip_suffix(".comments.jsonl") {
-            (value, IssueFileKind::CommentsJsonl)
-        } else if let Some(value) = file_name.strip_suffix(".comments.md") {
+        let (issue_key, kind) = if let Some(value) = file_name.strip_suffix(".comments.md") {
             (value, IssueFileKind::CommentsMarkdown)
         } else if let Some(value) = file_name.strip_suffix(".md") {
             (value, IssueFileKind::Main)
@@ -507,14 +417,9 @@ impl Filesystem for JiraFuseFs {
             return;
         };
 
-        if !issue_key.starts_with(&format!("{project}-")) {
-            reply.error(Errno::ENOENT);
-            return;
-        }
-
-        match self.issue_exists_in_project(&project, issue_key) {
+        match self.issue_exists_in_workspace(&workspace, issue_key) {
             Ok(true) => {
-                let ino = inode_for_issue_kind(&project, issue_key, kind);
+                let ino = inode_for_issue_kind(&workspace, issue_key, kind);
                 self.upsert_node(
                     ino,
                     Node::Issue {
@@ -522,11 +427,7 @@ impl Filesystem for JiraFuseFs {
                         kind,
                     },
                 );
-                let size = match kind {
-                    IssueFileKind::Main
-                    | IssueFileKind::CommentsMarkdown
-                    | IssueFileKind::CommentsJsonl => self.issue_sidecar_size(issue_key, kind),
-                };
+                let size = self.issue_sidecar_size(issue_key, kind);
                 reply.entry(&TTL, &self.file_attr(ino, size, false), Generation(0));
             }
             Ok(false) => reply.error(Errno::ENOENT),
@@ -540,7 +441,7 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        if ino == INO_SYNC_META || ino == INO_PROJECTS || ino == INO_TICKETS {
+        if ino == INO_SYNC_META || ino == INO_WORKSPACES {
             reply.attr(&TTL, &self.dir_attr(ino));
             return;
         }
@@ -557,20 +458,15 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        if ino == INO_TICKETS_INDEX {
-            let size = self
-                .tickets_index_jsonl_bytes()
-                .map(|v| v.len() as u64)
-                .unwrap_or(0);
-            reply.attr(&TTL, &self.file_attr(ino, size, false));
-            return;
-        }
-
-        if let Some(project) = self.projects.iter().find(|p| inode_for_project(p) == ino) {
+        if let Some(workspace) = self
+            .workspace_names()
+            .iter()
+            .find(|w| inode_for_workspace(w) == ino)
+        {
             self.upsert_node(
                 ino,
-                Node::Project {
-                    name: project.clone(),
+                Node::Workspace {
+                    name: workspace.clone(),
                 },
             );
             reply.attr(&TTL, &self.dir_attr(ino));
@@ -579,14 +475,10 @@ impl Filesystem for JiraFuseFs {
 
         match self.node_for_inode(ino) {
             Some(Node::Issue { key, kind }) => {
-                let size = match kind {
-                    IssueFileKind::Main
-                    | IssueFileKind::CommentsMarkdown
-                    | IssueFileKind::CommentsJsonl => self.issue_sidecar_size(&key, kind),
-                };
+                let size = self.issue_sidecar_size(&key, kind);
                 reply.attr(&TTL, &self.file_attr(ino, size, false));
             }
-            Some(Node::Project { .. }) => reply.attr(&TTL, &self.dir_attr(ino)),
+            Some(Node::Workspace { .. }) => reply.attr(&TTL, &self.dir_attr(ino)),
             _ => reply.error(Errno::ENOENT),
         }
     }
@@ -604,8 +496,11 @@ impl Filesystem for JiraFuseFs {
                 (INodeNo::ROOT, FileType::Directory, ".".to_string()),
                 (INodeNo::ROOT, FileType::Directory, "..".to_string()),
                 (INO_SYNC_META, FileType::Directory, ".sync_meta".to_string()),
-                (INO_PROJECTS, FileType::Directory, "projects".to_string()),
-                (INO_TICKETS, FileType::Directory, "tickets".to_string()),
+                (
+                    INO_WORKSPACES,
+                    FileType::Directory,
+                    "workspaces".to_string(),
+                ),
             ];
 
             for (idx, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
@@ -657,21 +552,21 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        if ino == INO_PROJECTS {
+        if ino == INO_WORKSPACES {
             let mut entries: Vec<(INodeNo, FileType, String)> = vec![
-                (INO_PROJECTS, FileType::Directory, ".".to_string()),
+                (INO_WORKSPACES, FileType::Directory, ".".to_string()),
                 (INodeNo::ROOT, FileType::Directory, "..".to_string()),
             ];
 
-            for project in &self.projects {
-                let p_ino = inode_for_project(project);
+            for workspace in self.workspace_names() {
+                let w_ino = inode_for_workspace(&workspace);
                 self.upsert_node(
-                    p_ino,
-                    Node::Project {
-                        name: project.clone(),
+                    w_ino,
+                    Node::Workspace {
+                        name: workspace.clone(),
                     },
                 );
-                entries.push((p_ino, FileType::Directory, project.clone()));
+                entries.push((w_ino, FileType::Directory, workspace));
             }
 
             for (idx, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
@@ -683,32 +578,12 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        if ino == INO_TICKETS {
-            let entries: Vec<(INodeNo, FileType, String)> = vec![
-                (INO_TICKETS, FileType::Directory, ".".to_string()),
-                (INodeNo::ROOT, FileType::Directory, "..".to_string()),
-                (
-                    INO_TICKETS_INDEX,
-                    FileType::RegularFile,
-                    "index.jsonl".to_string(),
-                ),
-            ];
-
-            for (idx, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
-                if reply.add(*entry_ino, (idx + 1) as u64, *kind, name) {
-                    break;
-                }
-            }
-            reply.ok();
-            return;
-        }
-
-        let Some(project) = self.project_for_inode(ino) else {
+        let Some(workspace) = self.workspace_for_inode(ino) else {
             reply.error(Errno::ENOENT);
             return;
         };
 
-        let issues = match self.project_issues(&project) {
+        let issues = match self.workspace_issues(&workspace) {
             Ok(items) => items,
             Err(err) => {
                 reply.error(err);
@@ -718,15 +593,13 @@ impl Filesystem for JiraFuseFs {
 
         let mut entries: Vec<(INodeNo, FileType, String)> = vec![
             (ino, FileType::Directory, ".".to_string()),
-            (INO_PROJECTS, FileType::Directory, "..".to_string()),
+            (INO_WORKSPACES, FileType::Directory, "..".to_string()),
         ];
 
         for issue in issues {
-            let issue_ino = inode_for_issue_kind(&project, &issue.key, IssueFileKind::Main);
+            let issue_ino = inode_for_issue_kind(&workspace, &issue.key, IssueFileKind::Main);
             let comments_md_ino =
-                inode_for_issue_kind(&project, &issue.key, IssueFileKind::CommentsMarkdown);
-            let comments_jsonl_ino =
-                inode_for_issue_kind(&project, &issue.key, IssueFileKind::CommentsJsonl);
+                inode_for_issue_kind(&workspace, &issue.key, IssueFileKind::CommentsMarkdown);
             self.upsert_node(
                 issue_ino,
                 Node::Issue {
@@ -741,13 +614,6 @@ impl Filesystem for JiraFuseFs {
                     kind: IssueFileKind::CommentsMarkdown,
                 },
             );
-            self.upsert_node(
-                comments_jsonl_ino,
-                Node::Issue {
-                    key: issue.key.clone(),
-                    kind: IssueFileKind::CommentsJsonl,
-                },
-            );
             entries.push((
                 issue_ino,
                 FileType::RegularFile,
@@ -757,11 +623,6 @@ impl Filesystem for JiraFuseFs {
                 comments_md_ino,
                 FileType::RegularFile,
                 format!("{}.comments.md", issue.key),
-            ));
-            entries.push((
-                comments_jsonl_ino,
-                FileType::RegularFile,
-                format!("{}.comments.jsonl", issue.key),
             ));
         }
 
@@ -782,13 +643,12 @@ impl Filesystem for JiraFuseFs {
         }
 
         match self.node_for_inode(ino) {
-            Some(Node::Issue { .. }) | Some(Node::SyncMetaFile) | Some(Node::TicketsIndex) => {
+            Some(Node::Issue { .. }) | Some(Node::SyncMetaFile) => {
                 reply.opened(FileHandle(0), FopenFlags::empty())
             }
-            Some(Node::Project { .. })
+            Some(Node::Workspace { .. })
             | Some(Node::SyncMeta)
-            | Some(Node::Projects)
-            | Some(Node::Tickets)
+            | Some(Node::Workspaces)
             | Some(Node::Root) => reply.error(Errno::EISDIR),
             None => reply.error(Errno::ENOENT),
         }
@@ -822,24 +682,6 @@ impl Filesystem for JiraFuseFs {
             return;
         }
 
-        if ino == INO_TICKETS_INDEX {
-            let data = match self.tickets_index_jsonl_bytes() {
-                Ok(data) => data,
-                Err(err) => {
-                    reply.error(err);
-                    return;
-                }
-            };
-            let start = offset as usize;
-            if start >= data.len() {
-                reply.data(&[]);
-                return;
-            }
-            let end = start.saturating_add(size as usize).min(data.len());
-            reply.data(&data[start..end]);
-            return;
-        }
-
         let Some(Node::Issue { key, kind }) = self.node_for_inode(ino) else {
             reply.error(Errno::ENOENT);
             return;
@@ -847,8 +689,7 @@ impl Filesystem for JiraFuseFs {
 
         let data = match kind {
             IssueFileKind::Main => self.issue_bytes(&key),
-            IssueFileKind::CommentsMarkdown => self.issue_comments_markdown_bytes(&key),
-            IssueFileKind::CommentsJsonl => self.issue_comments_jsonl_bytes(&key),
+            IssueFileKind::CommentsMarkdown => Ok(self.issue_comments_markdown_bytes(&key)),
         };
 
         let data = match data {
@@ -933,33 +774,26 @@ impl Filesystem for JiraFuseFs {
     }
 }
 
-pub fn inode_for_project(project: &str) -> INodeNo {
-    INodeNo(namespace_hash(0x11, project.as_bytes()))
+pub fn inode_for_workspace(workspace: &str) -> INodeNo {
+    INodeNo(namespace_hash(0x11, workspace.as_bytes()))
 }
 
-pub fn inode_for_issue(project: &str, issue_key: &str) -> INodeNo {
-    let mut bytes = project.as_bytes().to_vec();
+pub fn inode_for_issue(workspace: &str, issue_key: &str) -> INodeNo {
+    let mut bytes = workspace.as_bytes().to_vec();
     bytes.push(b'/');
     bytes.extend_from_slice(issue_key.as_bytes());
     INodeNo(namespace_hash(0x22, &bytes))
 }
 
-fn inode_for_issue_kind(project: &str, issue_key: &str, kind: IssueFileKind) -> INodeNo {
+fn inode_for_issue_kind(workspace: &str, issue_key: &str, kind: IssueFileKind) -> INodeNo {
     match kind {
-        IssueFileKind::Main => inode_for_issue(project, issue_key),
+        IssueFileKind::Main => inode_for_issue(workspace, issue_key),
         IssueFileKind::CommentsMarkdown => {
-            let mut bytes = project.as_bytes().to_vec();
+            let mut bytes = workspace.as_bytes().to_vec();
             bytes.push(b'/');
             bytes.extend_from_slice(issue_key.as_bytes());
             bytes.extend_from_slice(b"#comments.md");
             INodeNo(namespace_hash(0x23, &bytes))
-        }
-        IssueFileKind::CommentsJsonl => {
-            let mut bytes = project.as_bytes().to_vec();
-            bytes.push(b'/');
-            bytes.extend_from_slice(issue_key.as_bytes());
-            bytes.extend_from_slice(b"#comments.jsonl");
-            INodeNo(namespace_hash(0x24, &bytes))
         }
     }
 }
@@ -986,22 +820,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn project_inode_is_deterministic() {
-        assert_eq!(inode_for_project("PROJ"), inode_for_project("PROJ"));
+    fn workspace_inode_is_deterministic() {
+        assert_eq!(
+            inode_for_workspace("default"),
+            inode_for_workspace("default")
+        );
     }
 
     #[test]
-    fn distinct_project_inodes() {
-        assert_ne!(inode_for_project("AAA"), inode_for_project("BBB"));
+    fn distinct_workspace_inodes() {
+        assert_ne!(inode_for_workspace("alpha"), inode_for_workspace("beta"));
     }
 
     #[test]
     fn issue_inode_is_deterministic_and_namespaced() {
-        let a = inode_for_issue("PROJ", "PROJ-1");
-        let b = inode_for_issue("PROJ", "PROJ-1");
-        let c = inode_for_issue("PROJ", "PROJ-2");
+        let a = inode_for_issue("default", "PROJ-1");
+        let b = inode_for_issue("default", "PROJ-1");
+        let c = inode_for_issue("default", "PROJ-2");
         assert_eq!(a, b);
         assert_ne!(a, c);
-        assert_ne!(a, inode_for_project("PROJ"));
+        assert_ne!(a, inode_for_workspace("default"));
     }
 }

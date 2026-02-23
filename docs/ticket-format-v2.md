@@ -56,10 +56,9 @@ source_url: "https://<tenant>.atlassian.net/browse/ST-1010"
 - Timestamp fields must be normalized to ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`).
 - Token-like material must be redacted before writing ticket markdown.
 
-## Sidecars and index
+## Sidecars and discovery
 
 - Main ticket files should remain concise.
 - Verbose comments are emitted into sidecar files:
   - `<KEY>.comments.md`
-  - `<KEY>.comments.jsonl`
-- Ticket index is exposed as newline-delimited JSON in `tickets/index.jsonl`.
+- Ticket discovery is done through directory traversal under `workspaces/<workspace>/` and text search over markdown files.

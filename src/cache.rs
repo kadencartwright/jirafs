@@ -8,12 +8,12 @@ use std::time::{Duration, Instant};
 use crate::jira::IssueRef;
 use crate::logging;
 use crate::metrics::Metrics;
-use persistent::{PersistentCache, TicketIndexRow};
+use persistent::PersistentCache;
 
 /// Batch row for issue markdown cache upserts.
 pub type IssueCacheRow = (String, Vec<u8>, Option<String>);
 /// Batch row for issue comments sidecar upserts.
-pub type IssueSidecarRow = (String, Vec<u8>, Vec<u8>, Option<String>);
+pub type IssueSidecarRow = (String, Vec<u8>, Option<String>);
 
 #[derive(Debug, Clone)]
 /// Cached value with TTL and source metadata.
@@ -25,8 +25,8 @@ pub struct CacheEntry<T> {
 }
 
 #[derive(Debug, Clone)]
-/// Snapshot of project issue refs with staleness signal.
-pub struct ProjectIssuesSnapshot {
+/// Snapshot of workspace issue refs with staleness signal.
+pub struct WorkspaceIssuesSnapshot {
     pub issues: Vec<IssueRef>,
     pub is_stale: bool,
 }
@@ -39,9 +39,9 @@ struct CachedIssue {
 #[derive(Debug)]
 /// In-memory issue cache with optional SQLite persistence.
 pub struct InMemoryCache {
-    project_ttl: Duration,
+    workspace_ttl: Duration,
     issue_ttl: Duration,
-    project_issues: Mutex<HashMap<String, CacheEntry<Vec<IssueRef>>>>,
+    workspace_issues: Mutex<HashMap<String, CacheEntry<Vec<IssueRef>>>>,
     issue_markdown: Mutex<HashMap<String, CacheEntry<CachedIssue>>>,
     persistent: Option<PersistentCache>,
     metrics: Arc<Metrics>,
@@ -49,11 +49,11 @@ pub struct InMemoryCache {
 
 impl InMemoryCache {
     /// Creates an in-memory cache without persistence.
-    pub fn new(project_ttl: Duration, issue_ttl: Duration, metrics: Arc<Metrics>) -> Self {
+    pub fn new(workspace_ttl: Duration, issue_ttl: Duration, metrics: Arc<Metrics>) -> Self {
         Self {
-            project_ttl,
+            workspace_ttl,
             issue_ttl,
-            project_issues: Mutex::new(HashMap::new()),
+            workspace_issues: Mutex::new(HashMap::new()),
             issue_markdown: Mutex::new(HashMap::new()),
             persistent: None,
             metrics,
@@ -65,31 +65,31 @@ impl InMemoryCache {
     /// # Errors
     /// Returns [`rusqlite::Error`] when opening or initializing persistence fails.
     pub fn with_persistence(
-        project_ttl: Duration,
+        workspace_ttl: Duration,
         issue_ttl: Duration,
         db_path: &Path,
         metrics: Arc<Metrics>,
     ) -> Result<Self, rusqlite::Error> {
         Ok(Self {
-            project_ttl,
+            workspace_ttl,
             issue_ttl,
-            project_issues: Mutex::new(HashMap::new()),
+            workspace_issues: Mutex::new(HashMap::new()),
             issue_markdown: Mutex::new(HashMap::new()),
             persistent: Some(PersistentCache::new(db_path)?),
             metrics,
         })
     }
 
-    /// Gets project issues from cache or via `fetch`, then caches fresh values.
-    pub fn get_project_issues<F, E>(&self, project: &str, fetch: F) -> Result<Vec<IssueRef>, E>
+    /// Gets workspace issues from cache or via `fetch`, then caches fresh values.
+    pub fn get_workspace_issues<F, E>(&self, workspace: &str, fetch: F) -> Result<Vec<IssueRef>, E>
     where
         F: FnOnce() -> Result<Vec<IssueRef>, E>,
     {
         let now = Instant::now();
         if let Some(entry) = self
-            .project_issues
-            .lock_or_recover("project_issues")
-            .get(project)
+            .workspace_issues
+            .lock_or_recover("workspace_issues")
+            .get(workspace)
             .cloned()
         {
             if now.duration_since(entry.cached_at) < entry.ttl {
@@ -103,22 +103,25 @@ impl InMemoryCache {
         let entry = CacheEntry {
             value: fresh.clone(),
             cached_at: now,
-            ttl: self.project_ttl,
+            ttl: self.workspace_ttl,
             source_updated: None,
         };
-        self.project_issues
-            .lock_or_recover("project_issues")
-            .insert(project.to_string(), entry);
+        self.workspace_issues
+            .lock_or_recover("workspace_issues")
+            .insert(workspace.to_string(), entry);
         Ok(fresh)
     }
 
-    /// Returns a project issue snapshot with stale/fresh metadata.
-    pub fn get_project_issues_snapshot(&self, project: &str) -> Option<ProjectIssuesSnapshot> {
+    /// Returns a workspace issue snapshot with stale/fresh metadata.
+    pub fn get_workspace_issues_snapshot(
+        &self,
+        workspace: &str,
+    ) -> Option<WorkspaceIssuesSnapshot> {
         let now = Instant::now();
         let entry = self
-            .project_issues
-            .lock_or_recover("project_issues")
-            .get(project)
+            .workspace_issues
+            .lock_or_recover("workspace_issues")
+            .get(workspace)
             .cloned()?;
 
         let is_stale = now.duration_since(entry.cached_at) >= entry.ttl;
@@ -128,23 +131,28 @@ impl InMemoryCache {
             self.metrics.inc_cache_hit();
         }
 
-        Some(ProjectIssuesSnapshot {
+        Some(WorkspaceIssuesSnapshot {
             issues: entry.value,
             is_stale,
         })
     }
 
-    /// Replaces project issue refs in the in-memory cache.
-    pub fn upsert_project_issues(&self, project: &str, issues: Vec<IssueRef>) {
+    /// Replaces workspace issue refs in the in-memory cache.
+    pub fn upsert_workspace_issues(&self, workspace: &str, issues: Vec<IssueRef>) {
+        let persisted_issues = issues.clone();
         let entry = CacheEntry {
             value: issues,
             cached_at: Instant::now(),
-            ttl: self.project_ttl,
+            ttl: self.workspace_ttl,
             source_updated: None,
         };
-        self.project_issues
-            .lock_or_recover("project_issues")
-            .insert(project.to_string(), entry);
+        self.workspace_issues
+            .lock_or_recover("workspace_issues")
+            .insert(workspace.to_string(), entry);
+
+        if let Some(persistent) = &self.persistent {
+            let _ = persistent.upsert_workspace_issue_refs(workspace, &persisted_issues);
+        }
     }
 
     /// Returns issue markdown and serves stale values on refresh failure.
@@ -305,24 +313,24 @@ impl InMemoryCache {
         0
     }
 
-    /// Returns persisted sync cursor for a project when available.
-    pub fn get_sync_cursor(&self, project: &str) -> Option<String> {
+    /// Returns persisted sync cursor for a workspace when available.
+    pub fn get_sync_cursor(&self, workspace: &str) -> Option<String> {
         self.persistent
             .as_ref()
-            .and_then(|p| p.get_sync_cursor(project).ok().flatten())
+            .and_then(|p| p.get_sync_cursor(workspace).ok().flatten())
     }
 
-    /// Writes persisted sync cursor for a project when persistence is enabled.
-    pub fn set_sync_cursor(&self, project: &str, last_sync: &str) {
+    /// Writes persisted sync cursor for a workspace when persistence is enabled.
+    pub fn set_sync_cursor(&self, workspace: &str, last_sync: &str) {
         if let Some(persistent) = &self.persistent {
-            let _ = persistent.set_sync_cursor(project, last_sync);
+            let _ = persistent.set_sync_cursor(workspace, last_sync);
         }
     }
 
-    /// Clears persisted sync cursor for a project when persistence is enabled.
-    pub fn clear_sync_cursor(&self, project: &str) {
+    /// Clears persisted sync cursor for a workspace when persistence is enabled.
+    pub fn clear_sync_cursor(&self, workspace: &str) {
         if let Some(persistent) = &self.persistent {
-            let _ = persistent.clear_sync_cursor(project);
+            let _ = persistent.clear_sync_cursor(workspace);
         }
     }
 
@@ -339,13 +347,6 @@ impl InMemoryCache {
         self.persistent.is_some()
     }
 
-    /// Lists persisted ticket index rows.
-    pub fn list_ticket_index(&self, projects: &[String]) -> Option<Vec<TicketIndexRow>> {
-        self.persistent
-            .as_ref()
-            .and_then(|p| p.list_ticket_index(projects).ok())
-    }
-
     /// Returns persisted issue markdown length in bytes.
     pub fn persistent_issue_len(&self, issue_key: &str) -> Option<u64> {
         self.persistent
@@ -353,11 +354,14 @@ impl InMemoryCache {
             .and_then(|p| p.issue_markdown_len(issue_key).ok().flatten())
     }
 
-    /// Lists persisted project issue refs.
-    pub fn list_project_issue_refs_from_persistence(&self, project: &str) -> Option<Vec<IssueRef>> {
+    /// Lists persisted workspace issue refs.
+    pub fn list_workspace_issue_refs_from_persistence(
+        &self,
+        workspace: &str,
+    ) -> Option<Vec<IssueRef>> {
         self.persistent
             .as_ref()
-            .and_then(|p| p.list_project_issue_refs(project).ok())
+            .and_then(|p| p.list_workspace_issue_refs(workspace).ok())
     }
 
     /// Returns persisted comments markdown sidecar bytes.
@@ -367,25 +371,11 @@ impl InMemoryCache {
             .and_then(|p| p.get_issue_comments_md(issue_key).ok().flatten())
     }
 
-    /// Returns persisted comments jsonl sidecar bytes.
-    pub fn persistent_comments_jsonl(&self, issue_key: &str) -> Option<Vec<u8>> {
-        self.persistent
-            .as_ref()
-            .and_then(|p| p.get_issue_comments_jsonl(issue_key).ok().flatten())
-    }
-
     /// Returns persisted comments markdown sidecar length in bytes.
     pub fn persistent_comments_md_len(&self, issue_key: &str) -> Option<u64> {
         self.persistent
             .as_ref()
             .and_then(|p| p.issue_comments_md_len(issue_key).ok().flatten())
-    }
-
-    /// Returns persisted comments jsonl sidecar length in bytes.
-    pub fn persistent_comments_jsonl_len(&self, issue_key: &str) -> Option<u64> {
-        self.persistent
-            .as_ref()
-            .and_then(|p| p.issue_comments_jsonl_len(issue_key).ok().flatten())
     }
 }
 

@@ -215,22 +215,22 @@ impl JiraClient {
         })
     }
 
-    /// Lists issue keys for a Jira project in key order.
+    /// Lists issue refs for an arbitrary JQL query.
     ///
     /// # Errors
     /// Returns [`JiraError`] when request transport, HTTP status, or decode fails.
-    pub fn list_project_issue_refs(&self, project: &str) -> Result<Vec<IssueRef>, JiraError> {
+    pub fn list_issue_refs_for_jql(&self, jql: &str) -> Result<Vec<IssueRef>, JiraError> {
         let mut start_at: usize = 0;
         let mut next_page_token: Option<String> = None;
         let max_results: usize = 50;
-        let jql = format!("project={} ORDER BY key ASC", project);
+        let scoped_jql = jql.trim().to_string();
         let mut all = Vec::new();
 
         loop {
             let url = format!("{}/rest/api/3/search/jql", self.base_url);
             let response = self.request_with_retry(|| {
                 let mut query = vec![
-                    ("jql", jql.clone()),
+                    ("jql", scoped_jql.clone()),
                     ("fields", "updated".to_string()),
                     ("maxResults", max_results.to_string()),
                 ];
@@ -262,8 +262,8 @@ impl JiraClient {
                     body.clone()
                 };
                 logging::warn(format!(
-                    "failed decoding Jira search response for project {}: {}",
-                    project, short_body
+                    "failed decoding Jira search response for jql '{}': {}",
+                    scoped_jql, short_body
                 ));
                 JiraError::Decode {
                     source,
@@ -273,8 +273,8 @@ impl JiraClient {
             let page_issues = payload.take_issues();
             let page_count = page_issues.len();
             logging::debug(format!(
-                "jira list project={} page_count={} start_at={} next_page_token_present={}",
-                project,
+                "jira list jql='{}' page_count={} start_at={} next_page_token_present={}",
+                scoped_jql,
                 page_count,
                 start_at,
                 payload
@@ -314,8 +314,8 @@ impl JiraClient {
 
         if all.is_empty() {
             logging::warn(format!(
-                "jira project {} returned zero issues for jql '{}'; verify project key and Browse Project permission",
-                project, jql
+                "jira returned zero issues for jql '{}'; verify JQL and Browse permissions",
+                scoped_jql
             ));
         }
 
@@ -904,7 +904,7 @@ mod tests {
     use httpmock::MockServer;
 
     #[test]
-    fn paginates_project_issue_listing() {
+    fn paginates_jql_issue_listing() {
         let server = MockServer::start();
 
         let _page_1 = server.mock(|when, then| {
@@ -939,7 +939,7 @@ mod tests {
 
         let client = JiraClient::new(server.base_url(), "e".into(), "t".into()).expect("client");
         let items = client
-            .list_project_issue_refs("PROJ")
+            .list_issue_refs_for_jql("project=PROJ ORDER BY key ASC")
             .expect("list should succeed");
 
         assert_eq!(items.len(), 2);

@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::jira::IssueData;
 
@@ -85,9 +85,8 @@ pub fn render_issue_markdown(issue: &IssueData) -> String {
 
     out.push_str("## Comments\n\n");
     out.push_str(&format!(
-        "{} comment(s). See `{}.comments.md` or `{}.comments.jsonl`.\n",
+        "{} comment(s). See `{}.comments.md`.\n",
         issue.comments.len(),
-        issue.key,
         issue.key
     ));
 
@@ -122,23 +121,6 @@ pub fn render_issue_comments_markdown(issue: &IssueData) -> String {
         }
     }
 
-    out
-}
-
-pub fn render_issue_comments_jsonl(issue: &IssueData) -> String {
-    let mut out = String::new();
-    for (idx, comment) in issue.comments.iter().enumerate() {
-        let line = json!({
-            "event": "comment",
-            "seq": idx + 1,
-            "id": comment.id,
-            "author": comment.author_display_name,
-            "created_at": normalize_iso_utc(comment.created.as_deref()),
-            "body_markdown": adf_to_markdown(&comment.body).trim().to_string(),
-        });
-        out.push_str(&line.to_string());
-        out.push('\n');
-    }
     out
 }
 

@@ -5,6 +5,7 @@ Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 ## Prerequisites
 
 - Rust toolchain (`rustup`, `cargo`)
+- `just` task runner (optional, recommended)
 
 ### Linux
 
@@ -19,7 +20,29 @@ Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 ## Build
 
 ```bash
-cargo build
+just build
+```
+
+Raw Cargo alternative:
+
+```bash
+cargo build --locked
+```
+
+## Install
+
+Install the binary from this repository and bootstrap a default config in the runtime lookup path:
+
+```bash
+just install
+```
+
+`just install` is non-destructive for config bootstrap. If `config.toml` already exists at the resolved destination, install exits with an explicit refusal instead of overwriting it.
+
+Raw Cargo alternative:
+
+```bash
+cargo install --path . --locked
 ```
 
 ## Quality Checks
@@ -50,6 +73,12 @@ Create a TOML config file at one of these paths:
 Start from the checked-in example:
 
 ```bash
+just install
+```
+
+Manual alternative:
+
+```bash
 mkdir -p ~/.config/fs-jira
 cp config.example.toml ~/.config/fs-jira/config.toml
 ```
@@ -73,8 +102,8 @@ cargo run -- \
   --jira-base-url https://your-domain.atlassian.net \
   --jira-email you@example.com \
   --jira-api-token ... \
-  --jira-project PROJ \
-  --jira-project OPS \
+  --jira-workspace "default=project in (PROJ, OPS) ORDER BY updated DESC" \
+  --jira-workspace "ops=project = OPS ORDER BY updated DESC" \
   --cache-db-path /tmp/fs-jira-cache.db \
   --cache-ttl-secs 30 \
   --sync-budget 1000 \
@@ -89,7 +118,7 @@ Migration key mapping:
 - `JIRA_BASE_URL` -> `jira.base_url`
 - `JIRA_EMAIL` -> `jira.email`
 - `JIRA_API_TOKEN` -> `jira.api_token`
-- `JIRA_PROJECTS` -> `jira.projects`
+- `JIRA_WORKSPACES` -> `jira.workspaces.<name>.jql`
 - `JIRA_CACHE_TTL_SECS` -> `cache.ttl_secs`
 - `FS_JIRA_CACHE_DB` -> `cache.db_path`
 - `FS_JIRA_SYNC_BUDGET` -> `sync.budget`
@@ -102,27 +131,40 @@ Migration key mapping:
 Create a mountpoint and run:
 
 ```bash
+just run /tmp/fs-jira-mnt
+```
+
+To run with an explicit config file path:
+
+```bash
+just run-with-config /path/to/config.toml /tmp/fs-jira-mnt
+```
+
+Raw Cargo alternative:
+
+```bash
 mkdir -p /tmp/fs-jira-mnt
-cargo run -- /tmp/fs-jira-mnt
+cargo run --locked -- /tmp/fs-jira-mnt
 ```
 
 In another terminal:
 
 ```bash
 ls -la /tmp/fs-jira-mnt
-ls -la /tmp/fs-jira-mnt/PROJ
-cat /tmp/fs-jira-mnt/PROJ/PROJ-123.md
-grep -R "Status:" /tmp/fs-jira-mnt
+ls -la /tmp/fs-jira-mnt/workspaces
+ls -la /tmp/fs-jira-mnt/workspaces/default
+cat /tmp/fs-jira-mnt/workspaces/default/PROJ-123.md
+grep -R "in_progress" /tmp/fs-jira-mnt/workspaces
 ```
 
 The filesystem is mounted read-only. Writes should fail.
 
 Notes:
 - `cache.db_path` enables persistent issue markdown cache (SQLite).
-- Project listings are seeded at startup (best effort) before mount.
+- Workspace listings are hydrated from persistence on startup.
 - Sync warmup prefetches recent issues up to `sync.budget`.
 - Periodic cache/API counters are emitted to stderr.
-- Project directory listings serve cached results immediately and refresh stale listings in the background.
+- Workspace directory listings serve cached results immediately.
 - `logging.debug = true` enables verbose debug logs for refresh/retry/cache flow.
 
 ## Unmount

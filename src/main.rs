@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,8 +21,7 @@ flags:\n\
   --jira-base-url <url>\n\
   --jira-email <email>\n\
   --jira-api-token <token>\n\
-  --jira-project <key> (repeatable)\n\
-  --jira-projects <k1,k2,...>\n\
+  --jira-workspace <name=jql> (repeatable)\n\
   --cache-db-path <path>\n\
   --cache-ttl-secs <u64>\n\
   --sync-budget <usize>\n\
@@ -62,26 +62,13 @@ fn parse_cli_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<Cli
             "--jira-api-token" => {
                 overrides.jira_api_token = Some(next_string(&mut iter, "--jira-api-token")?);
             }
-            "--jira-project" => {
-                let value = next_string(&mut iter, "--jira-project")?;
+            "--jira-workspace" => {
+                let value = next_string(&mut iter, "--jira-workspace")?;
+                let (name, jql) = parse_workspace_override(&value)?;
                 overrides
-                    .jira_projects
-                    .get_or_insert_with(Vec::new)
-                    .push(value);
-            }
-            "--jira-projects" => {
-                let values = next_string(&mut iter, "--jira-projects")?;
-                let projects: Vec<String> = values
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(ToOwned::to_owned)
-                    .collect();
-
-                overrides
-                    .jira_projects
-                    .get_or_insert_with(Vec::new)
-                    .extend(projects);
+                    .jira_workspaces
+                    .get_or_insert_with(HashMap::new)
+                    .insert(name, fs_jira::config::WorkspaceConfig { jql });
             }
             "--cache-db-path" => {
                 overrides.cache_db_path = Some(next_string(&mut iter, "--cache-db-path")?);
@@ -173,10 +160,27 @@ fn parse_bool(value: &str) -> Result<bool, String> {
     }
 }
 
+fn parse_workspace_override(value: &str) -> Result<(String, String), String> {
+    let Some((name, jql)) = value.split_once('=') else {
+        return Err(format!(
+            "invalid workspace override '{value}': expected <name=jql>"
+        ));
+    };
+    let name = name.trim();
+    let jql = jql.trim();
+    if name.is_empty() {
+        return Err("workspace name in --jira-workspace must not be empty".to_string());
+    }
+    if jql.is_empty() {
+        return Err(format!("workspace jql for '{name}' must not be empty"));
+    }
+    Ok((name.to_string(), jql.to_string()))
+}
+
 fn spawn_periodic_sync(
     jira: Arc<JiraClient>,
     cache: Arc<InMemoryCache>,
-    projects: Vec<String>,
+    workspaces: Vec<(String, String)>,
     sync_budget: usize,
     sync_state: Arc<SyncState>,
 ) -> std::thread::JoinHandle<()> {
@@ -202,13 +206,18 @@ fn spawn_periodic_sync(
                 logging::info(format!("starting {} sync", reason));
 
                 if manual_full_triggered {
-                    for project in &projects {
-                        cache.clear_sync_cursor(project);
+                    for (workspace, _) in &workspaces {
+                        cache.clear_sync_cursor(workspace);
                     }
                 }
 
-                let result =
-                    sync_issues(&jira, &cache, &projects, sync_budget, manual_full_triggered);
+                let result = sync_issues(
+                    &jira,
+                    &cache,
+                    &workspaces,
+                    sync_budget,
+                    manual_full_triggered,
+                );
 
                 sync_state.mark_sync_complete();
                 if manual_full_triggered {
@@ -285,7 +294,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     }
 
-    let projects = app_config.jira.projects.clone();
+    let mut workspaces: Vec<(String, String)> = app_config
+        .jira
+        .workspaces
+        .iter()
+        .map(|(name, workspace)| (name.clone(), workspace.jql.clone()))
+        .collect();
+    workspaces.sort_by(|a, b| a.0.cmp(&b.0));
     let ttl_secs = app_config.cache.ttl_secs;
     let metrics_interval_secs = app_config.metrics.interval_secs;
     let sync_budget = app_config.sync.budget;
@@ -293,8 +308,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Arc::new(Metrics::new());
 
     logging::info(format!(
-        "starting fs-jira projects={} ttl={}s sync_budget={} sync_interval={}s",
-        projects.join(","),
+        "starting fs-jira workspaces={} ttl={}s sync_budget={} sync_interval={}s",
+        workspaces
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
         ttl_secs,
         sync_budget,
         sync_interval_secs
@@ -324,18 +343,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&metrics),
     )?);
 
-    let mut hydrated_projects = 0usize;
-    for project in &projects {
-        if let Some(issue_refs) = cache.list_project_issue_refs_from_persistence(project) {
+    let mut hydrated_workspaces = 0usize;
+    for (workspace, _) in &workspaces {
+        if let Some(issue_refs) = cache.list_workspace_issue_refs_from_persistence(workspace) {
             if !issue_refs.is_empty() {
-                cache.upsert_project_issues(project, issue_refs);
-                hydrated_projects += 1;
+                cache.upsert_workspace_issues(workspace, issue_refs);
+                hydrated_workspaces += 1;
             }
         }
     }
     logging::info(format!(
-        "hydrated {} project listings from persistent cache",
-        hydrated_projects
+        "hydrated {} workspace listings from persistent cache",
+        hydrated_workspaces
     ));
 
     let sync_state = Arc::new(SyncState::new(Duration::from_secs(sync_interval_secs)));
@@ -345,7 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _sync_thread = spawn_periodic_sync(
         Arc::clone(&jira),
         Arc::clone(&cache),
-        projects.clone(),
+        workspaces.clone(),
         sync_budget,
         Arc::clone(&sync_state),
     );
@@ -353,7 +372,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fs = JiraFuseFs::new(
         unsafe { libc::geteuid() },
         unsafe { libc::getegid() },
-        projects.clone(),
+        workspaces.clone(),
         Arc::clone(&jira),
         Arc::clone(&cache),
         sync_budget,
@@ -416,13 +435,13 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_repeatable_project_flags() {
+    fn cli_parses_repeatable_workspace_flags() {
         let args = vec![
             OsString::from("fs-jira"),
-            OsString::from("--jira-project"),
-            OsString::from("PROJ"),
-            OsString::from("--jira-projects"),
-            OsString::from("OPS,ENG"),
+            OsString::from("--jira-workspace"),
+            OsString::from("default=project in (PROJ, OPS) ORDER BY updated DESC"),
+            OsString::from("--jira-workspace"),
+            OsString::from("eng=project = ENG"),
             OsString::from("/tmp/mount"),
         ];
 
@@ -430,12 +449,20 @@ mod tests {
             .expect("cli should parse")
             .expect("expected run arguments");
         assert_eq!(
-            cli.overrides.jira_projects,
-            Some(vec![
-                "PROJ".to_string(),
-                "OPS".to_string(),
-                "ENG".to_string()
-            ])
+            cli.overrides
+                .jira_workspaces
+                .as_ref()
+                .and_then(|workspaces| workspaces.get("default"))
+                .map(|workspace| workspace.jql.as_str()),
+            Some("project in (PROJ, OPS) ORDER BY updated DESC")
+        );
+        assert_eq!(
+            cli.overrides
+                .jira_workspaces
+                .as_ref()
+                .and_then(|workspaces| workspaces.get("eng"))
+                .map(|workspace| workspace.jql.as_str()),
+            Some("project = ENG")
         );
     }
 

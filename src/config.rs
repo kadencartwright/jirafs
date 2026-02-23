@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -21,7 +22,12 @@ pub struct JiraConfig {
     pub base_url: String,
     pub email: String,
     pub api_token: String,
-    pub projects: Vec<String>,
+    pub workspaces: HashMap<String, WorkspaceConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct WorkspaceConfig {
+    pub jql: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,7 +88,7 @@ pub struct AppConfigOverrides {
     pub jira_base_url: Option<String>,
     pub jira_email: Option<String>,
     pub jira_api_token: Option<String>,
-    pub jira_projects: Option<Vec<String>>,
+    pub jira_workspaces: Option<HashMap<String, WorkspaceConfig>>,
     pub cache_db_path: Option<String>,
     pub cache_ttl_secs: Option<u64>,
     pub sync_budget: Option<usize>,
@@ -171,8 +177,8 @@ impl AppConfig {
         if let Some(value) = &overrides.jira_api_token {
             self.jira.api_token = value.clone();
         }
-        if let Some(value) = &overrides.jira_projects {
-            self.jira.projects = value.clone();
+        if let Some(value) = &overrides.jira_workspaces {
+            self.jira.workspaces = value.clone();
         }
         if let Some(value) = &overrides.cache_db_path {
             self.cache.db_path = value.clone();
@@ -210,20 +216,22 @@ impl AppConfig {
                 "jira.api_token must not be empty".into(),
             ));
         }
-        if self.jira.projects.is_empty() {
+        if self.jira.workspaces.is_empty() {
             return Err(ConfigError::Invalid(
-                "jira.projects must contain at least one project key".into(),
+                "jira.workspaces must contain at least one workspace".into(),
             ));
         }
-        if self
-            .jira
-            .projects
-            .iter()
-            .any(|project| project.trim().is_empty())
-        {
-            return Err(ConfigError::Invalid(
-                "jira.projects must not include empty project keys".into(),
-            ));
+        for (name, workspace) in &self.jira.workspaces {
+            if name.trim().is_empty() {
+                return Err(ConfigError::Invalid(
+                    "jira.workspaces must not include empty workspace names".into(),
+                ));
+            }
+            if workspace.jql.trim().is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "jira.workspaces.{name}.jql must not be empty"
+                )));
+            }
         }
         if self.cache.db_path.trim().is_empty() {
             return Err(ConfigError::Invalid(
@@ -297,20 +305,20 @@ mod tests {
     }
 
     #[test]
-    fn validates_rejects_empty_projects() {
+    fn validates_rejects_empty_workspaces() {
         let raw = r#"
             [jira]
             base_url = "https://example.atlassian.net"
             email = "you@example.com"
             api_token = "token"
-            projects = []
+            [jira.workspaces]
 
             [cache]
             db_path = "/tmp/fs-jira-cache.db"
         "#;
 
         let cfg: AppConfig = toml::from_str(raw).expect("toml should parse");
-        let err = cfg.validate().expect_err("empty projects should fail");
+        let err = cfg.validate().expect_err("empty workspaces should fail");
         assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
@@ -321,7 +329,9 @@ mod tests {
             base_url = "https://example.atlassian.net"
             email = "you@example.com"
             api_token = "token"
-            projects = ["PROJ"]
+
+            [jira.workspaces.default]
+            jql = "project = PROJ ORDER BY updated DESC"
 
             [cache]
             db_path = "/tmp/fs-jira-cache.db"
@@ -356,7 +366,12 @@ mod tests {
             jira_base_url: Some("https://override.atlassian.net".into()),
             jira_email: Some("override@example.com".into()),
             jira_api_token: Some("override-token".into()),
-            jira_projects: Some(vec!["OPS".into()]),
+            jira_workspaces: Some(HashMap::from([(
+                "ops".to_string(),
+                WorkspaceConfig {
+                    jql: "project = OPS ORDER BY updated DESC".to_string(),
+                },
+            )])),
             cache_db_path: Some("/tmp/override.db".into()),
             cache_ttl_secs: Some(15),
             sync_budget: Some(250),
@@ -371,7 +386,14 @@ mod tests {
         assert_eq!(cfg.jira.base_url, "https://override.atlassian.net");
         assert_eq!(cfg.jira.email, "override@example.com");
         assert_eq!(cfg.jira.api_token, "override-token");
-        assert_eq!(cfg.jira.projects, vec!["OPS"]);
+        assert_eq!(cfg.jira.workspaces.len(), 1);
+        assert_eq!(
+            cfg.jira
+                .workspaces
+                .get("ops")
+                .map(|workspace| workspace.jql.as_str()),
+            Some("project = OPS ORDER BY updated DESC")
+        );
         assert_eq!(cfg.cache.db_path, "/tmp/override.db");
         assert_eq!(cfg.cache.ttl_secs, 15);
         assert_eq!(cfg.sync.budget, 250);

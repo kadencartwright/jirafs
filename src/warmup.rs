@@ -3,29 +3,27 @@ use std::sync::Arc;
 use crate::cache::InMemoryCache;
 use crate::jira::JiraClient;
 use crate::logging;
-use crate::render::{
-    render_issue_comments_jsonl, render_issue_comments_markdown, render_issue_markdown,
-};
+use crate::render::{render_issue_comments_markdown, render_issue_markdown};
 
-pub fn seed_project_listings(
+pub fn seed_workspace_listings(
     jira: &JiraClient,
     cache: &InMemoryCache,
-    projects: &[String],
+    workspaces: &[(String, String)],
 ) -> usize {
     let mut seeded = 0;
-    for project in projects {
-        match jira.list_project_issue_refs(project) {
+    for (workspace, jql) in workspaces {
+        match jira.list_issue_refs_for_jql(jql) {
             Ok(items) => {
                 let count = items.len();
-                cache.upsert_project_issues(project, items);
+                cache.upsert_workspace_issues(workspace, items);
                 logging::info(format!(
-                    "seeded project listing for {} with {} issues",
-                    project, count
+                    "seeded workspace listing for {} with {} issues",
+                    workspace, count
                 ));
                 seeded += 1;
             }
             Err(err) => {
-                logging::warn(format!("failed to seed project {}: {}", project, err));
+                logging::warn(format!("failed to seed workspace {}: {}", workspace, err));
             }
         }
     }
@@ -41,7 +39,7 @@ pub struct SyncResult {
 pub fn sync_issues(
     jira: &JiraClient,
     cache: &Arc<InMemoryCache>,
-    projects: &[String],
+    workspaces: &[(String, String)],
     budget: usize,
     force_full: bool,
 ) -> SyncResult {
@@ -62,24 +60,27 @@ pub fn sync_issues(
         return result;
     }
 
-    for project in projects {
+    for (workspace, base_jql) in workspaces {
         let cursor = if force_full {
             None
         } else {
-            cache.get_sync_cursor(project)
+            cache.get_sync_cursor(workspace)
         };
 
         let jql = match &cursor {
             Some(since) => {
-                logging::info(format!("incremental sync for {} since {}", project, since));
+                logging::info(format!(
+                    "incremental sync for workspace {} since {}",
+                    workspace, since
+                ));
                 format!(
-                    "project={} AND updated > \"{}\" ORDER BY updated DESC",
-                    project, since
+                    "({}) AND updated > \"{}\" ORDER BY updated DESC",
+                    base_jql, since
                 )
             }
             None => {
-                logging::info(format!("initial full sync for {}", project));
-                format!("project={} ORDER BY updated DESC", project)
+                logging::info(format!("initial full sync for workspace {}", workspace));
+                format!("({})", base_jql)
             }
         };
 
@@ -96,10 +97,10 @@ pub fn sync_issues(
                     .collect();
 
                 if cursor.is_none() {
-                    cache.upsert_project_issues(project, latest_refs);
+                    cache.upsert_workspace_issues(workspace, latest_refs);
                 } else {
                     let mut merged = cache
-                        .get_project_issues_snapshot(project)
+                        .get_workspace_issues_snapshot(workspace)
                         .map(|snapshot| snapshot.issues)
                         .unwrap_or_default();
 
@@ -114,11 +115,11 @@ pub fn sync_issues(
                     }
 
                     merged.sort_by(|a, b| a.key.cmp(&b.key));
-                    cache.upsert_project_issues(project, merged);
+                    cache.upsert_workspace_issues(workspace, merged);
                 }
 
                 if issues.is_empty() {
-                    logging::info(format!("sync for {}: no changes", project));
+                    logging::info(format!("sync for workspace {}: no changes", workspace));
                     result.issues_skipped += 1;
                     continue;
                 }
@@ -142,7 +143,6 @@ pub fn sync_issues(
                         (
                             issue.key.clone(),
                             render_issue_comments_markdown(issue).into_bytes(),
-                            render_issue_comments_jsonl(issue).into_bytes(),
                             issue.updated.clone(),
                         )
                     })
@@ -153,18 +153,24 @@ pub fn sync_issues(
                 result.issues_cached += cached;
 
                 if let Some(latest) = issues.first().and_then(|i| i.updated.as_ref()) {
-                    cache.set_sync_cursor(project, latest);
-                    logging::info(format!("updated sync cursor for {} to {}", project, latest));
+                    cache.set_sync_cursor(workspace, latest);
+                    logging::info(format!(
+                        "updated sync cursor for workspace {} to {}",
+                        workspace, latest
+                    ));
                 }
 
-                logging::info(format!("sync for {}: cached {} issues", project, cached));
+                logging::info(format!(
+                    "sync for workspace {}: cached {} issues",
+                    workspace, cached
+                ));
 
                 if result.issues_cached >= budget {
                     break;
                 }
             }
             Err(err) => {
-                let msg = format!("sync failed for {}: {}", project, err);
+                let msg = format!("sync failed for workspace {}: {}", workspace, err);
                 logging::warn(&msg);
                 result.errors.push(msg);
             }
