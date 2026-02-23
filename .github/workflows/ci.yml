@@ -10,6 +10,9 @@ jobs:
   checks:
     name: checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      NODE_VERSION: '20.12.2'
+      RUST_VERSION: '1.84.0'
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +33,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libfuse3-dev pkg-config
 
+      - name: Install Linux tray dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: brew install macfuse pkgconf
@@ -37,7 +44,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
 
       - name: cargo check
         run: cargo check --locked
@@ -48,6 +63,18 @@ jobs:
           cargo fmt --check
           cargo clippy --all-targets --all-features --locked -- -D warnings
           cargo test --all-targets --all-features --locked
+
+      - name: Desktop frontend checks
+        run: |
+          npm --prefix apps/desktop ci
+          npm --prefix apps/desktop run biome:check
+          npm --prefix apps/desktop run build
+
+      - name: Desktop Tauri backend checks
+        run: |
+          cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 
       - name: macOS quality gates
         if: runner.os == 'macOS'

@@ -1,0 +1,20 @@
+[package]
+name = "fs-jira-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "fs_jira_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.2.0", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.2.5", features = ["tray-icon"] }
+wait-timeout = "0.2"
+shlex = "1.3"
+libc = "0.2"
+fs-jira = { path = "../../.." }

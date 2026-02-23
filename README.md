@@ -7,6 +7,11 @@ Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 - Rust toolchain (`rustup`, `cargo`)
 - `just` task runner (optional, recommended)
 
+Pinned toolchain versions used in CI:
+
+- Node.js `20.12.2`
+- Rust `1.84.0`
+
 ### Linux
 
 - FUSE support enabled
@@ -252,4 +257,31 @@ macOS:
 
 ```bash
 umount /tmp/fs-jira-mnt
+```
+
+## Desktop App (Tauri)
+
+The repository includes an additive desktop control UI at `apps/desktop` for Linux tray / macOS menubar status and sync actions.
+
+Desktop prerequisites:
+
+- Node.js `20.12.2`
+- Rust `1.84.0`
+- Linux: `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`
+
+Install and run:
+
+```bash
+npm --prefix apps/desktop ci
+npm --prefix apps/desktop run tauri:dev
+```
+
+Desktop checks:
+
+```bash
+npm --prefix apps/desktop run biome:check
+npm --prefix apps/desktop run build
+cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
