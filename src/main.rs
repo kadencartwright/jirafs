@@ -103,6 +103,20 @@ fn spawn_periodic_sync(
     })
 }
 
+fn mount_options() -> Vec<MountOption> {
+    let mut options = vec![
+        MountOption::FSName("fs-jira".to_string()),
+        MountOption::DefaultPermissions,
+        MountOption::RO,
+    ];
+
+    if cfg!(target_os = "macos") {
+        options.push(MountOption::NoAtime);
+    }
+
+    options
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::dotenv();
 
@@ -203,10 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut config = Config::default();
-    config.mount_options.extend([
-        MountOption::FSName("fs-jira".to_string()),
-        MountOption::DefaultPermissions,
-    ]);
+    config.mount_options.extend(mount_options());
 
     logging::info(format!(
         "mounting filesystem at {}",
@@ -214,4 +225,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     fuser::mount2(fs, mountpoint_path, &config)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mount_options_include_required_defaults() {
+        let options = mount_options();
+
+        assert!(options
+            .iter()
+            .any(|option| matches!(option, MountOption::FSName(name) if name == "fs-jira")));
+        assert!(options.contains(&MountOption::DefaultPermissions));
+        assert!(options.contains(&MountOption::RO));
+        assert!(!options.contains(&MountOption::RW));
+    }
 }

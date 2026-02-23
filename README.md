@@ -4,9 +4,17 @@ Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 
 ## Prerequisites
 
-- Linux with FUSE support
 - Rust toolchain (`rustup`, `cargo`)
+
+### Linux
+
+- FUSE support enabled
 - FUSE userspace library headers (for example, `libfuse3-dev` on Debian/Ubuntu)
+
+### macOS
+
+- macFUSE and pkg-config (for example, `brew install macfuse pkgconf`)
+- On Apple Silicon, allow third-party kernel extensions for macFUSE
 
 ## Build
 
@@ -29,6 +37,8 @@ Optional API docs validation:
 ```bash
 cargo doc --no-deps
 ```
+
+CI runs on Linux and macOS to validate compilation and quality gates. Runtime mount and unmount behavior still needs a real host-level smoke test.
 
 ## Configure Jira
 
@@ -82,8 +92,16 @@ Notes:
 
 ## Unmount
 
+Linux:
+
 ```bash
 fusermount3 -u /tmp/fs-jira-mnt
 ```
 
 If your distro provides `fusermount` instead of `fusermount3`, use that command.
+
+macOS:
+
+```bash
+umount /tmp/fs-jira-mnt
+```
