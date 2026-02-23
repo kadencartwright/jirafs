@@ -42,25 +42,60 @@ CI runs on Linux and macOS to validate compilation and quality gates. Runtime mo
 
 ## Configure Jira
 
-Set required environment variables:
+Create a TOML config file at one of these paths:
+
+- `$XDG_CONFIG_HOME/fs-jira/config.toml` (preferred when `XDG_CONFIG_HOME` is set)
+- `~/.config/fs-jira/config.toml` (fallback when `XDG_CONFIG_HOME` is unset)
+
+Start from the checked-in example:
 
 ```bash
-export JIRA_BASE_URL="https://your-domain.atlassian.net"
-export JIRA_EMAIL="you@example.com"
-export JIRA_API_TOKEN="..."
-export JIRA_PROJECTS="PROJ,OPS"
+mkdir -p ~/.config/fs-jira
+cp config.example.toml ~/.config/fs-jira/config.toml
+```
 
-# Optional tuning
-export JIRA_CACHE_TTL_SECS="30"
-export FS_JIRA_CACHE_DB="/tmp/fs-jira-cache.db"
-export FS_JIRA_WARMUP_BUDGET="25"
-export FS_JIRA_METRICS_INTERVAL_SECS="60"
-export FS_JIRA_DEBUG="1"
+Then edit `~/.config/fs-jira/config.toml` with your Jira values:
+
+```bash
+cat ~/.config/fs-jira/config.toml
 ```
 
 Authentication uses Jira Cloud basic auth with email + API token.
 
-You can also place these values in a local `.env` file for testing; it is auto-loaded at startup.
+Runtime config is a hard cutover to TOML; environment variables and `.env` are no longer read at startup.
+
+You can override config location and individual values with CLI flags. CLI values take precedence over TOML values.
+Use `-c` as a short alias for `--config`, and `--help` (or `-h`) to print CLI usage.
+
+```bash
+cargo run -- \
+  --config /path/to/config.toml \
+  --jira-base-url https://your-domain.atlassian.net \
+  --jira-email you@example.com \
+  --jira-api-token ... \
+  --jira-project PROJ \
+  --jira-project OPS \
+  --cache-db-path /tmp/fs-jira-cache.db \
+  --cache-ttl-secs 30 \
+  --sync-budget 1000 \
+  --sync-interval-secs 60 \
+  --metrics-interval-secs 60 \
+  --logging-debug false \
+  /tmp/fs-jira-mnt
+```
+
+Migration key mapping:
+
+- `JIRA_BASE_URL` -> `jira.base_url`
+- `JIRA_EMAIL` -> `jira.email`
+- `JIRA_API_TOKEN` -> `jira.api_token`
+- `JIRA_PROJECTS` -> `jira.projects`
+- `JIRA_CACHE_TTL_SECS` -> `cache.ttl_secs`
+- `FS_JIRA_CACHE_DB` -> `cache.db_path`
+- `FS_JIRA_SYNC_BUDGET` -> `sync.budget`
+- `FS_JIRA_SYNC_INTERVAL_SECS` -> `sync.interval_secs`
+- `FS_JIRA_METRICS_INTERVAL_SECS` -> `metrics.interval_secs`
+- `FS_JIRA_DEBUG` -> `logging.debug`
 
 ## Mount
 
@@ -83,12 +118,12 @@ grep -R "Status:" /tmp/fs-jira-mnt
 The filesystem is mounted read-only. Writes should fail.
 
 Notes:
-- `FS_JIRA_CACHE_DB` enables persistent issue markdown cache (SQLite).
+- `cache.db_path` enables persistent issue markdown cache (SQLite).
 - Project listings are seeded at startup (best effort) before mount.
-- Warmup prefetches recent issues up to `FS_JIRA_WARMUP_BUDGET`.
+- Sync warmup prefetches recent issues up to `sync.budget`.
 - Periodic cache/API counters are emitted to stderr.
 - Project directory listings serve cached results immediately and refresh stale listings in the background.
-- `FS_JIRA_DEBUG=1` enables verbose debug logs for refresh/retry/cache flow.
+- `logging.debug = true` enables verbose debug logs for refresh/retry/cache flow.
 
 ## Unmount
 

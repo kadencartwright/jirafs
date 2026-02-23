@@ -1,7 +1,10 @@
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use fs_jira::cache::InMemoryCache;
+use fs_jira::config::AppConfigOverrides;
 use fs_jira::fs::JiraFuseFs;
 use fs_jira::jira::JiraClient;
 use fs_jira::logging;
@@ -10,36 +13,164 @@ use fs_jira::sync_state::SyncState;
 use fs_jira::warmup::sync_issues;
 use fuser::{Config, MountOption};
 
-fn required_env(name: &str) -> Result<String, Box<dyn std::error::Error>> {
-    std::env::var(name).map_err(|_| format!("missing required environment variable: {name}").into())
+const USAGE: &str = "usage: cargo run -- [flags] <mountpoint>\n\
+flags:\n\
+  -c, --config <path>\n\
+  -h, --help\n\
+  --jira-base-url <url>\n\
+  --jira-email <email>\n\
+  --jira-api-token <token>\n\
+  --jira-project <key> (repeatable)\n\
+  --jira-projects <k1,k2,...>\n\
+  --cache-db-path <path>\n\
+  --cache-ttl-secs <u64>\n\
+  --sync-budget <usize>\n\
+  --sync-interval-secs <u64>\n\
+  --metrics-interval-secs <u64>\n\
+  --logging-debug <true|false>";
+
+#[derive(Debug)]
+struct CliArgs {
+    mountpoint: PathBuf,
+    config_path: Option<PathBuf>,
+    overrides: AppConfigOverrides,
 }
 
-fn parse_projects(raw: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let projects: Vec<String> = raw
-        .split(',')
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToString::to_string)
-        .collect();
+fn parse_cli_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<CliArgs>, String> {
+    let mut iter = args.into_iter();
+    let _program = iter.next();
 
-    if projects.is_empty() {
-        return Err("JIRA_PROJECTS must contain at least one project key".into());
+    let mut mountpoint = None;
+    let mut config_path = None;
+    let mut overrides = AppConfigOverrides::default();
+
+    while let Some(arg) = iter.next() {
+        let arg_text = arg.to_string_lossy();
+        match arg_text.as_ref() {
+            "-h" | "--help" => {
+                return Ok(None);
+            }
+            "-c" | "--config" => {
+                config_path = Some(PathBuf::from(next_value(&mut iter, "--config")?));
+            }
+            "--jira-base-url" => {
+                overrides.jira_base_url = Some(next_string(&mut iter, "--jira-base-url")?);
+            }
+            "--jira-email" => {
+                overrides.jira_email = Some(next_string(&mut iter, "--jira-email")?);
+            }
+            "--jira-api-token" => {
+                overrides.jira_api_token = Some(next_string(&mut iter, "--jira-api-token")?);
+            }
+            "--jira-project" => {
+                let value = next_string(&mut iter, "--jira-project")?;
+                overrides
+                    .jira_projects
+                    .get_or_insert_with(Vec::new)
+                    .push(value);
+            }
+            "--jira-projects" => {
+                let values = next_string(&mut iter, "--jira-projects")?;
+                let projects: Vec<String> = values
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect();
+
+                overrides
+                    .jira_projects
+                    .get_or_insert_with(Vec::new)
+                    .extend(projects);
+            }
+            "--cache-db-path" => {
+                overrides.cache_db_path = Some(next_string(&mut iter, "--cache-db-path")?);
+            }
+            "--cache-ttl-secs" => {
+                overrides.cache_ttl_secs =
+                    Some(parse_u64(&next_string(&mut iter, "--cache-ttl-secs")?)?);
+            }
+            "--sync-budget" => {
+                overrides.sync_budget =
+                    Some(parse_usize(&next_string(&mut iter, "--sync-budget")?)?);
+            }
+            "--sync-interval-secs" => {
+                overrides.sync_interval_secs =
+                    Some(parse_u64(&next_string(&mut iter, "--sync-interval-secs")?)?);
+            }
+            "--metrics-interval-secs" => {
+                overrides.metrics_interval_secs = Some(parse_u64(&next_string(
+                    &mut iter,
+                    "--metrics-interval-secs",
+                )?)?);
+            }
+            "--logging-debug" => {
+                overrides.logging_debug =
+                    Some(parse_bool(&next_string(&mut iter, "--logging-debug")?)?);
+            }
+            "--" => {
+                if mountpoint.is_none() {
+                    let value = iter
+                        .next()
+                        .ok_or_else(|| format!("missing mountpoint\n{USAGE}"))?;
+                    mountpoint = Some(PathBuf::from(value));
+                }
+                if iter.next().is_some() {
+                    return Err(format!("unexpected extra positional arguments\n{USAGE}"));
+                }
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown flag: {value}\n{USAGE}"));
+            }
+            _ => {
+                if mountpoint.is_some() {
+                    return Err(format!(
+                        "unexpected extra positional argument: {arg_text}\n{USAGE}"
+                    ));
+                }
+                mountpoint = Some(PathBuf::from(arg));
+            }
+        }
     }
-    Ok(projects)
+
+    let mountpoint = mountpoint.ok_or_else(|| format!("missing mountpoint\n{USAGE}"))?;
+    Ok(Some(CliArgs {
+        mountpoint,
+        config_path,
+        overrides,
+    }))
 }
 
-fn env_u64(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(default)
+fn next_value(iter: &mut impl Iterator<Item = OsString>, flag: &str) -> Result<OsString, String> {
+    iter.next()
+        .ok_or_else(|| format!("missing value for {flag}\n{USAGE}"))
 }
 
-fn env_usize(name: &str, default: usize) -> usize {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(default)
+fn next_string(iter: &mut impl Iterator<Item = OsString>, flag: &str) -> Result<String, String> {
+    let value = next_value(iter, flag)?;
+    value
+        .into_string()
+        .map_err(|_| format!("{flag} value must be valid UTF-8"))
+}
+
+fn parse_u64(value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .map_err(|_| format!("invalid integer value: {value}"))
+}
+
+fn parse_usize(value: &str) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .map_err(|_| format!("invalid integer value: {value}"))
+}
+
+fn parse_bool(value: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(format!("invalid boolean value: {value}")),
+    }
 }
 
 fn spawn_periodic_sync(
@@ -118,17 +249,34 @@ fn mount_options() -> Vec<MountOption> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = dotenvy::dotenv();
+    let cli = parse_cli_args(std::env::args_os())
+        .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
 
-    let mut args = std::env::args_os();
-    let _program = args.next();
-    let mountpoint = match args.next() {
-        Some(path) => path,
+    let cli = match cli {
+        Some(cli) => cli,
         None => {
-            return Err("usage: cargo run -- <mountpoint>".into());
+            eprintln!("{USAGE}");
+            return Ok(());
         }
     };
-    let mountpoint_path = std::path::PathBuf::from(&mountpoint);
+
+    let mut app_config = if let Some(config_path) = cli.config_path.as_deref() {
+        fs_jira::config::load_from(config_path)?
+    } else {
+        fs_jira::config::load()?
+    };
+
+    app_config.apply_overrides(&cli.overrides)?;
+    logging::init(app_config.logging.debug);
+
+    if let Some(config_path) = cli.config_path.as_deref() {
+        logging::info(format!(
+            "loaded config from override path {}",
+            config_path.display()
+        ));
+    }
+
+    let mountpoint_path = cli.mountpoint;
     if !mountpoint_path.exists() {
         std::fs::create_dir_all(&mountpoint_path)?;
         logging::info(format!(
@@ -137,14 +285,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     }
 
-    let base_url = required_env("JIRA_BASE_URL")?;
-    let email = required_env("JIRA_EMAIL")?;
-    let token = required_env("JIRA_API_TOKEN")?;
-    let projects = parse_projects(&required_env("JIRA_PROJECTS")?)?;
-    let ttl_secs = env_u64("JIRA_CACHE_TTL_SECS", 30);
-    let metrics_interval_secs = env_u64("FS_JIRA_METRICS_INTERVAL_SECS", 60);
-    let sync_budget = env_usize("FS_JIRA_SYNC_BUDGET", 1000);
-    let sync_interval_secs = env_u64("FS_JIRA_SYNC_INTERVAL_SECS", 60);
+    let projects = app_config.jira.projects.clone();
+    let ttl_secs = app_config.cache.ttl_secs;
+    let metrics_interval_secs = app_config.metrics.interval_secs;
+    let sync_budget = app_config.sync.budget;
+    let sync_interval_secs = app_config.sync.interval_secs;
     let metrics = Arc::new(Metrics::new());
 
     logging::info(format!(
@@ -161,24 +306,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let jira = Arc::new(JiraClient::new_with_metrics(
-        base_url,
-        email,
-        token,
+        app_config.jira.base_url,
+        app_config.jira.email,
+        app_config.jira.api_token,
         Arc::clone(&metrics),
     )?);
     logging::info(format!("using jira base url {}", jira.base_url));
 
-    let cache = if let Ok(path) = std::env::var("FS_JIRA_CACHE_DB") {
-        logging::info(format!("persistent cache enabled at {}", path));
-        Arc::new(InMemoryCache::with_persistence(
-            Duration::from_secs(ttl_secs),
-            Duration::from_secs(ttl_secs),
-            std::path::Path::new(&path),
-            Arc::clone(&metrics),
-        )?)
-    } else {
-        return Err("FS_JIRA_CACHE_DB is required for incremental sync".into());
-    };
+    logging::info(format!(
+        "persistent cache enabled at {}",
+        app_config.cache.db_path
+    ));
+    let cache = Arc::new(InMemoryCache::with_persistence(
+        Duration::from_secs(ttl_secs),
+        Duration::from_secs(ttl_secs),
+        Path::new(&app_config.cache.db_path),
+        Arc::clone(&metrics),
+    )?);
 
     let mut hydrated_projects = 0usize;
     for project in &projects {
@@ -241,5 +385,64 @@ mod tests {
         assert!(options.contains(&MountOption::DefaultPermissions));
         assert!(options.contains(&MountOption::RO));
         assert!(!options.contains(&MountOption::RW));
+    }
+
+    #[test]
+    fn cli_parses_config_override_and_scalar_flags() {
+        let args = vec![
+            OsString::from("fs-jira"),
+            OsString::from("-c"),
+            OsString::from("/tmp/custom.toml"),
+            OsString::from("--jira-base-url"),
+            OsString::from("https://example.atlassian.net"),
+            OsString::from("--sync-budget"),
+            OsString::from("250"),
+            OsString::from("--logging-debug"),
+            OsString::from("true"),
+            OsString::from("/tmp/mount"),
+        ];
+
+        let cli = parse_cli_args(args)
+            .expect("cli should parse")
+            .expect("expected run arguments");
+        assert_eq!(cli.mountpoint, PathBuf::from("/tmp/mount"));
+        assert_eq!(cli.config_path, Some(PathBuf::from("/tmp/custom.toml")));
+        assert_eq!(
+            cli.overrides.jira_base_url,
+            Some("https://example.atlassian.net".into())
+        );
+        assert_eq!(cli.overrides.sync_budget, Some(250));
+        assert_eq!(cli.overrides.logging_debug, Some(true));
+    }
+
+    #[test]
+    fn cli_parses_repeatable_project_flags() {
+        let args = vec![
+            OsString::from("fs-jira"),
+            OsString::from("--jira-project"),
+            OsString::from("PROJ"),
+            OsString::from("--jira-projects"),
+            OsString::from("OPS,ENG"),
+            OsString::from("/tmp/mount"),
+        ];
+
+        let cli = parse_cli_args(args)
+            .expect("cli should parse")
+            .expect("expected run arguments");
+        assert_eq!(
+            cli.overrides.jira_projects,
+            Some(vec![
+                "PROJ".to_string(),
+                "OPS".to_string(),
+                "ENG".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn cli_help_flag_returns_help_result() {
+        let args = vec![OsString::from("fs-jira"), OsString::from("--help")];
+        let result = parse_cli_args(args).expect("help should parse");
+        assert!(result.is_none());
     }
 }

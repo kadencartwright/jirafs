@@ -58,7 +58,7 @@ pub fn sync_issues(
     if !cache.has_persistence() {
         result
             .errors
-            .push("FS_JIRA_CACHE_DB must be set for sync".to_string());
+            .push("cache.db_path must be configured for sync".to_string());
         return result;
     }
 

@@ -3,6 +3,8 @@
 
 /// In-memory cache and persistent cache integration.
 pub mod cache;
+/// Runtime configuration loading and validation.
+pub mod config;
 /// FUSE filesystem implementation that serves Jira content.
 pub mod fs;
 /// Jira API client and issue data models.

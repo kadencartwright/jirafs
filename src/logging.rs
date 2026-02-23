@@ -1,18 +1,14 @@
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-static DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
+static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn init(debug: bool) {
+    DEBUG_ENABLED.store(debug, Ordering::Relaxed);
+}
 
 fn debug_enabled() -> bool {
-    *DEBUG_ENABLED.get_or_init(|| {
-        std::env::var("FS_JIRA_DEBUG")
-            .ok()
-            .map(|v| {
-                let normalized = v.trim().to_ascii_lowercase();
-                normalized == "1" || normalized == "true" || normalized == "yes"
-            })
-            .unwrap_or(false)
-    })
+    DEBUG_ENABLED.load(Ordering::Relaxed)
 }
 
 fn ts() -> u64 {

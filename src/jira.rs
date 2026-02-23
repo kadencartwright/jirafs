@@ -81,7 +81,7 @@ pub enum JiraError {
         source: serde_json::Error,
         body: String,
     },
-    #[error("invalid JIRA_BASE_URL '{0}'")]
+    #[error("invalid jira.base_url '{0}'")]
     InvalidBaseUrl(String),
 }
 

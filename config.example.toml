@@ -1,0 +1,19 @@
+[jira]
+base_url = "https://your-domain.atlassian.net"
+email = "you@example.com"
+api_token = "your_api_token_here"
+projects = ["PROJ", "OPS"]
+
+[cache]
+db_path = "/tmp/fs-jira-cache.db"
+ttl_secs = 30
+
+[sync]
+budget = 1000
+interval_secs = 60
+
+[metrics]
+interval_secs = 60
+
+[logging]
+debug = false
