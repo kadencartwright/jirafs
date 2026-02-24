@@ -81,24 +81,24 @@ export default function App() {
   }, [refreshWorkspaces]);
 
   return (
-    <main className="min-h-screen bg-slate-950 p-4 text-slate-100 sm:p-6">
+    <main className="min-h-screen bg-canvas p-4 text-ink sm:p-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
         <header>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">
+          <p className="text-xs uppercase tracking-[0.24em] text-muted">
             jirafs desktop
           </p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-50">
+          <h1 className="mt-1 text-2xl font-semibold text-ink">
             Service Control Panel
           </h1>
         </header>
 
         {error ? (
-          <div className="rounded-lg border border-red-500/30 bg-red-950/40 p-3 text-sm text-red-200">
+          <div className="rounded-lg border border-danger/50 bg-danger/15 p-3 text-sm text-danger">
             {error}
           </div>
         ) : null}
         {loading && !status ? (
-          <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3 text-sm text-slate-200">
+          <div className="rounded-lg border border-border/70 bg-panel/70 p-3 text-sm text-ink">
             Loading status...
           </div>
         ) : null}
@@ -106,6 +106,16 @@ export default function App() {
         {status ? (
           <>
             <StatusCard status={status} />
+            <WorkspacesCard
+              initialRows={workspaceRows}
+              loadError={workspaceError}
+              loading={workspaceLoading}
+              onSave={async (rows) => {
+                await saveWorkspaceJqlConfig(rows);
+                await refreshWorkspaces();
+              }}
+              onValidate={validateWorkspaceJqls}
+            />
             <PathCard status={status} />
             <ActionsCard
               serviceRunning={status.service_running}
@@ -117,19 +127,9 @@ export default function App() {
               onResync={() => runAction("resync")}
             />
             <LogsCard error={logsError} loading={logsLoading} logs={logs} />
-            <WorkspacesCard
-              initialRows={workspaceRows}
-              loadError={workspaceError}
-              loading={workspaceLoading}
-              onSave={async (rows) => {
-                await saveWorkspaceJqlConfig(rows);
-                await refreshWorkspaces();
-              }}
-              onValidate={validateWorkspaceJqls}
-            />
 
             {status.errors.length > 0 ? (
-              <section className="rounded-xl border border-amber-500/40 bg-amber-950/35 p-4 text-sm text-amber-200">
+              <section className="rounded-xl border border-warn/50 bg-warn/15 p-4 text-sm text-warn">
                 <h2 className="mb-2 font-semibold">Diagnostics</h2>
                 <ul className="list-disc pl-4">
                   {status.errors.map((item) => (

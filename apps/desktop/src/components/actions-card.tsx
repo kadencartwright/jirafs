@@ -73,13 +73,13 @@ export function ActionsCard({
 
   return (
     <>
-      <section className="rounded-xl border border-slate-700/80 bg-slate-900/70 p-4 shadow-sm shadow-black/20">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+      <section className="rounded-xl border border-border/70 bg-panel/80 p-4 shadow-sm shadow-black/25">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
           Actions
         </h2>
         <div className="flex flex-wrap gap-2">
           <button
-            className="rounded-md bg-blue-500 px-3 py-2 text-sm font-medium text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-canvas hover:bg-primary/85 disabled:cursor-not-allowed disabled:bg-border/50 disabled:text-muted"
             disabled={serviceActionDisabled || busy}
             onClick={() => {
               void run(async () => {
@@ -92,7 +92,7 @@ export function ActionsCard({
             {serviceRunning ? "Restart Service" : "Start Service"}
           </button>
           <button
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-slate-950 hover:bg-teal-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-canvas hover:bg-accent/85 disabled:cursor-not-allowed disabled:bg-border/50 disabled:text-muted"
             disabled={syncDisabled || busy}
             onClick={() => {
               void run(async () => {
@@ -105,7 +105,7 @@ export function ActionsCard({
             Resync
           </button>
           <button
-            className="rounded-md bg-danger px-3 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            className="rounded-md bg-danger px-3 py-2 text-sm font-medium text-canvas hover:bg-danger/85 disabled:cursor-not-allowed disabled:bg-border/50 disabled:text-muted"
             disabled={syncDisabled || busy}
             onClick={() => {
               setDialogOpen(true);
@@ -116,18 +116,18 @@ export function ActionsCard({
           </button>
         </div>
         {!serviceInstalled ? (
-          <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-950/35 p-3 text-xs text-amber-200">
+          <div className="mt-3 rounded-md border border-warn/50 bg-warn/15 p-3 text-xs text-warn">
             <p className="font-semibold">Service is not installed yet</p>
-            <p className="mt-1 text-amber-100/90">
+            <p className="mt-1 text-ink/85">
               Install and enable it from the repository root:
             </p>
-            <p className="mt-1 font-mono text-amber-100">
+            <p className="mt-1 font-mono text-ink">
               just service-install && just service-enable
             </p>
           </div>
         ) : null}
         {message ? (
-          <p className="mt-3 text-xs text-slate-400">{message}</p>
+          <p className="mt-3 text-xs text-muted">{message}</p>
         ) : null}
       </section>
 

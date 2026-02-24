@@ -6,11 +6,11 @@ type Props = {
 
 function PathRow({ label, value }: { label: string; value: string | null }) {
   return (
-    <div className="rounded-md border border-slate-700/70 bg-slate-900/65 p-3">
-      <p className="mb-1 text-xs uppercase tracking-wide text-slate-400">
+    <div className="rounded-md border border-border/60 bg-canvas/60 p-3">
+      <p className="mb-1 text-xs uppercase tracking-wide text-muted">
         {label}
       </p>
-      <p className="break-all font-mono text-xs text-slate-100">
+      <p className="break-all font-mono text-xs text-ink">
         {value ?? "unresolved"}
       </p>
     </div>
@@ -19,8 +19,8 @@ function PathRow({ label, value }: { label: string; value: string | null }) {
 
 export function PathCard({ status }: Props) {
   return (
-    <section className="rounded-xl border border-slate-700/80 bg-slate-900/70 p-4 shadow-sm shadow-black/20">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+    <section className="rounded-xl border border-border/70 bg-panel/80 p-4 shadow-sm shadow-black/25">
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
         Paths
       </h2>
       <div className="grid grid-cols-1 gap-3">

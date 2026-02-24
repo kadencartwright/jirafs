@@ -5,6 +5,8 @@
 :root {
   color-scheme: dark;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background-color: #1e2127;
+  color: #e6efff;
 }
 
 * {
@@ -13,6 +15,6 @@
 
 body {
   margin: 0;
-  background-color: #070b12;
-  color: #e6edf8;
+  background-color: #1e2127;
+  color: #e6efff;
 }

@@ -643,7 +643,12 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    TrayIconBuilder::with_id("main")
+    let mut tray_builder = TrayIconBuilder::with_id("main");
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
+    }
+
+    tray_builder
         .tooltip("jirafs: starting")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {

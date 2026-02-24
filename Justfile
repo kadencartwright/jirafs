@@ -181,8 +181,9 @@ install:
     fi; \
     local_bin_dir="$HOME/.local/bin"; \
     mkdir -p "$local_bin_dir"; \
-    cp "$desktop_bin" "$local_bin_dir/jirafs-desktop"; \
-    chmod +x "$local_bin_dir/jirafs-desktop"; \
+    tmp_desktop_bin="$local_bin_dir/jirafs-desktop.new"; \
+    install -m 755 "$desktop_bin" "$tmp_desktop_bin"; \
+    mv -f "$tmp_desktop_bin" "$local_bin_dir/jirafs-desktop"; \
     os_name="$(uname -s)"; \
     if [ "$os_name" = "Linux" ]; then \
       data_home="${XDG_DATA_HOME:-$HOME/.local/share}"; \
@@ -208,7 +209,7 @@ install:
       cp "$local_bin_dir/jirafs-desktop" "$resources_dir/jirafs-desktop-bin"; \
       cp apps/desktop/src-tauri/icons/icon.png "$resources_dir/icon.png"; \
       LAUNCHER_SCRIPT="$launcher_script" RESOURCES_DIR="$resources_dir" python -c 'import os,pathlib; p=pathlib.Path(os.environ["LAUNCHER_SCRIPT"]); p.write_text("#!/bin/bash\nexec \\\"{}/jirafs-desktop-bin\\\" \\\"$@\\\"\n".format(os.environ["RESOURCES_DIR"])); p.chmod(0o755)'; \
-      INFO_PLIST="$info_plist" python -c 'import os,pathlib; p=pathlib.Path(os.environ["INFO_PLIST"]); p.write_text("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>CFBundleDisplayName</key>\n  <string>jirafs Desktop</string>\n  <key>CFBundleExecutable</key>\n  <string>jirafs-desktop</string>\n  <key>CFBundleIdentifier</key>\n  <string>com.jirafs.desktop</string>\n  <key>CFBundleName</key>\n  <string>jirafs Desktop</string>\n  <key>CFBundlePackageType</key>\n  <string>APPL</string>\n  <key>CFBundleShortVersionString</key>\n  <string>0.1.0</string>\n  <key>CFBundleVersion</key>\n  <string>0.1.0</string>\n  <key>LSMinimumSystemVersion</key>\n  <string>12.0</string>\n</dict>\n</plist>\n")'; \
+      INFO_PLIST="$info_plist" python -c 'import os,pathlib; p=pathlib.Path(os.environ["INFO_PLIST"]); p.write_text("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>CFBundleDisplayName</key>\n  <string>jirafs Desktop</string>\n  <key>CFBundleExecutable</key>\n  <string>jirafs-desktop</string>\n  <key>CFBundleIdentifier</key>\n  <string>com.jirafs.desktop</string>\n  <key>CFBundleIconFile</key>\n  <string>icon.png</string>\n  <key>CFBundleName</key>\n  <string>jirafs Desktop</string>\n  <key>CFBundlePackageType</key>\n  <string>APPL</string>\n  <key>CFBundleShortVersionString</key>\n  <string>0.1.0</string>\n  <key>CFBundleVersion</key>\n  <string>0.1.0</string>\n  <key>LSMinimumSystemVersion</key>\n  <string>12.0</string>\n</dict>\n</plist>\n")'; \
       echo "installed macOS app bundle: $app_dir"; \
     else \
       echo "desktop app launcher setup skipped (unsupported OS: $os_name)"; \

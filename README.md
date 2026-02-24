@@ -2,6 +2,8 @@
 
 Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 
+![jirafs logo](apps/desktop/src-tauri/icons/icon.png)
+
 ## Prerequisites
 
 - Rust toolchain (`rustup`, `cargo`)
