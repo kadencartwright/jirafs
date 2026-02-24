@@ -1,4 +1,4 @@
-# fs-jira Desktop: Restart, Logs, Tray Minimize, and Workspace JQL Editor Implementation Plan
+# jirafs Desktop: Restart, Logs, Tray Minimize, and Workspace JQL Editor Implementation Plan
 
 ## Overview
 
@@ -12,7 +12,7 @@ The current desktop app already has strong status/action foundations but no log 
 - Desktop backend currently exposes `get_app_status`, `trigger_sync`, and `start_user_service` only (`apps/desktop/src-tauri/src/lib.rs:83`, `apps/desktop/src-tauri/src/lib.rs:90`, `apps/desktop/src-tauri/src/lib.rs:147`).
 - Cross-platform service start commands are implemented in platform modules (`apps/desktop/src-tauri/src/service_linux.rs:58`, `apps/desktop/src-tauri/src/service_macos.rs:45`).
 - Tray menu is present (Open/Start/Resync/Full Resync/Quit), but no close/minimize interception exists (`apps/desktop/src-tauri/src/lib.rs:329`, `apps/desktop/src-tauri/src/lib.rs:376`).
-- Logs are available via OS facilities and repo recipes, not via UI (`Justfile:127`, `deploy/launchd/com.fs-jira.mount.plist.tmpl:21`).
+- Logs are available via OS facilities and repo recipes, not via UI (`Justfile:127`, `deploy/launchd/com.jirafs.mount.plist.tmpl:21`).
 - Config schema already supports workspace JQL and validates non-empty entries (`src/config.rs:25`, `src/config.rs:230`), but desktop UI only displays paths (`apps/desktop/src/components/path-card.tsx:27`).
 - Jira JQL execution path already exists and can be reused for validation (`src/jira.rs:222`, `src/warmup.rs:94`).
 
@@ -42,7 +42,7 @@ Desktop UI supports:
 
 - Editing Jira credentials (`jira.base_url`, `jira.email`, `jira.api_token`) in desktop UI.
 - Building historical log replay from before desktop app launch.
-- Changing `fs-jira` FUSE, sync, or cache core behavior.
+- Changing `jirafs` FUSE, sync, or cache core behavior.
 - Adding Windows support.
 - Replacing service install/enable workflows in `Justfile`.
 
@@ -87,8 +87,8 @@ fn ensure_service_running_or_restart(app: AppHandle) -> Result<ServiceActionResu
 #### 2. Platform-specific stop/restart support
 **Files**: `apps/desktop/src-tauri/src/service_linux.rs`, `apps/desktop/src-tauri/src/service_macos.rs`
 **Changes**:
-- Linux: add `restart_service()` using `systemctl --user restart fs-jira.service`.
-- macOS: add `restart_service()` via `launchctl kickstart -k gui/<uid>/com.fs-jira.mount`.
+- Linux: add `restart_service()` using `systemctl --user restart jirafs.service`.
+- macOS: add `restart_service()` via `launchctl kickstart -k gui/<uid>/com.jirafs.mount`.
 - Keep timeout/error classification behavior aligned with `run_command_with_timeout` (`apps/desktop/src-tauri/src/errors.rs:29`).
 
 #### 3. Frontend command/types update
@@ -147,8 +147,8 @@ fn get_session_logs(state: tauri::State<LogBufferState>) -> Result<Vec<LogLineDt
 #### 2. Platform log tail readers
 **Files**: `apps/desktop/src-tauri/src/service_linux.rs`, `apps/desktop/src-tauri/src/service_macos.rs`
 **Changes**:
-- Linux: spawn `journalctl --user -u fs-jira.service -f --output=short-iso` reader and append lines.
-- macOS: tail both `~/Library/Logs/fs-jira.log` and `~/Library/Logs/fs-jira.err.log` with follow mode.
+- Linux: spawn `journalctl --user -u jirafs.service -f --output=short-iso` reader and append lines.
+- macOS: tail both `~/Library/Logs/jirafs.log` and `~/Library/Logs/jirafs.err.log` with follow mode.
 - Add graceful shutdown behavior when desktop exits.
 
 #### 3. Frontend logs panel
@@ -222,7 +222,7 @@ Add a UI form that edits only `jira.workspaces.<name>.jql`, validates candidate 
 **Changes**:
 - Add command to load config and return workspace list:
   - resolve path from status/config resolver (`apps/desktop/src-tauri/src/lib.rs:206`, `src/config.rs:146`)
-  - parse with `fs_jira::config::load_from` (`src/config.rs:125`)
+  - parse with `jirafs::config::load_from` (`src/config.rs:125`)
 - Add save command to update only `jira.workspaces` map and preserve other config keys.
 - Ensure post-write parse/validate succeeds via existing config validation path (`src/config.rs:205`).
 
@@ -318,6 +318,6 @@ fn save_workspace_jql_config(..., workspaces: Vec<WorkspaceJqlInputDto>) -> Resu
 - macOS service start: `apps/desktop/src-tauri/src/service_macos.rs:45`
 - Tray menu/open/quit: `apps/desktop/src-tauri/src/lib.rs:329`
 - Service log recipes: `Justfile:127`
-- launchd log file paths: `deploy/launchd/com.fs-jira.mount.plist.tmpl:21`
+- launchd log file paths: `deploy/launchd/com.jirafs.mount.plist.tmpl:21`
 - Config load/validate: `src/config.rs:125`
 - Jira JQL listing API call: `src/jira.rs:222`

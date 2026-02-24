@@ -1,4 +1,4 @@
-# fs-jira
+# jirafs
 
 Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 
@@ -45,9 +45,9 @@ just install
 `just install` now also:
 
 - builds the desktop UI from `apps/desktop`
-- installs desktop binary at `~/.local/bin/fs-jira-desktop`
-- Linux: creates desktop entry at `${XDG_DATA_HOME:-~/.local/share}/applications/fs-jira-desktop.desktop`
-- macOS: creates app bundle at `~/Applications/fs-jira Desktop.app`
+- installs desktop binary at `~/.local/bin/jirafs-desktop`
+- Linux: creates desktop entry at `${XDG_DATA_HOME:-~/.local/share}/applications/jirafs-desktop.desktop`
+- macOS: creates app bundle at `~/Applications/jirafs Desktop.app`
 
 Config bootstrap remains non-destructive. If `config.toml` already exists at the resolved destination, install keeps going and skips writing a new config file.
 
@@ -79,8 +79,8 @@ CI runs on Linux and macOS to validate compilation and quality gates. Runtime mo
 
 Create a TOML config file at one of these paths:
 
-- `$XDG_CONFIG_HOME/fs-jira/config.toml` (preferred when `XDG_CONFIG_HOME` is set)
-- `~/.config/fs-jira/config.toml` (fallback when `XDG_CONFIG_HOME` is unset)
+- `$XDG_CONFIG_HOME/jirafs/config.toml` (preferred when `XDG_CONFIG_HOME` is set)
+- `~/.config/jirafs/config.toml` (fallback when `XDG_CONFIG_HOME` is unset)
 
 Start from the checked-in example:
 
@@ -91,14 +91,14 @@ just install
 Manual alternative:
 
 ```bash
-mkdir -p ~/.config/fs-jira
-cp config.example.toml ~/.config/fs-jira/config.toml
+mkdir -p ~/.config/jirafs
+cp config.example.toml ~/.config/jirafs/config.toml
 ```
 
-Then edit `~/.config/fs-jira/config.toml` with your Jira values:
+Then edit `~/.config/jirafs/config.toml` with your Jira values:
 
 ```bash
-cat ~/.config/fs-jira/config.toml
+cat ~/.config/jirafs/config.toml
 ```
 
 Authentication uses Jira Cloud basic auth with email + API token.
@@ -116,13 +116,13 @@ cargo run -- \
   --jira-api-token ... \
   --jira-workspace "default=project in (PROJ, OPS) ORDER BY updated DESC" \
   --jira-workspace "ops=project = OPS ORDER BY updated DESC" \
-  --cache-db-path /tmp/fs-jira-cache.db \
+  --cache-db-path /tmp/jirafs-cache.db \
   --cache-ttl-secs 30 \
   --sync-budget 1000 \
   --sync-interval-secs 60 \
   --metrics-interval-secs 60 \
   --logging-debug false \
-  /tmp/fs-jira-mnt
+  /tmp/jirafs-mnt
 ```
 
 Migration key mapping:
@@ -132,41 +132,41 @@ Migration key mapping:
 - `JIRA_API_TOKEN` -> `jira.api_token`
 - `JIRA_WORKSPACES` -> `jira.workspaces.<name>.jql`
 - `JIRA_CACHE_TTL_SECS` -> `cache.ttl_secs`
-- `FS_JIRA_CACHE_DB` -> `cache.db_path`
-- `FS_JIRA_SYNC_BUDGET` -> `sync.budget`
-- `FS_JIRA_SYNC_INTERVAL_SECS` -> `sync.interval_secs`
-- `FS_JIRA_METRICS_INTERVAL_SECS` -> `metrics.interval_secs`
-- `FS_JIRA_DEBUG` -> `logging.debug`
+- `JIRAFS_CACHE_DB` -> `cache.db_path`
+- `JIRAFS_SYNC_BUDGET` -> `sync.budget`
+- `JIRAFS_SYNC_INTERVAL_SECS` -> `sync.interval_secs`
+- `JIRAFS_METRICS_INTERVAL_SECS` -> `metrics.interval_secs`
+- `JIRAFS_DEBUG` -> `logging.debug`
 
 ## Mount
 
 Create a mountpoint and run:
 
 ```bash
-just run /tmp/fs-jira-mnt
+just run /tmp/jirafs-mnt
 ```
 
 To run with an explicit config file path:
 
 ```bash
-just run-with-config /path/to/config.toml /tmp/fs-jira-mnt
+just run-with-config /path/to/config.toml /tmp/jirafs-mnt
 ```
 
 Raw Cargo alternative:
 
 ```bash
-mkdir -p /tmp/fs-jira-mnt
-cargo run --locked -- /tmp/fs-jira-mnt
+mkdir -p /tmp/jirafs-mnt
+cargo run --locked -- /tmp/jirafs-mnt
 ```
 
 In another terminal:
 
 ```bash
-ls -la /tmp/fs-jira-mnt
-ls -la /tmp/fs-jira-mnt/workspaces
-ls -la /tmp/fs-jira-mnt/workspaces/default
-cat /tmp/fs-jira-mnt/workspaces/default/PROJ-123.md
-grep -R "in_progress" /tmp/fs-jira-mnt/workspaces
+ls -la /tmp/jirafs-mnt
+ls -la /tmp/jirafs-mnt/workspaces
+ls -la /tmp/jirafs-mnt/workspaces/default
+cat /tmp/jirafs-mnt/workspaces/default/PROJ-123.md
+grep -R "in_progress" /tmp/jirafs-mnt/workspaces
 ```
 
 The filesystem is effectively read-only for issue content. The only supported writes are sync triggers to `.sync_meta/manual_refresh` and `.sync_meta/full_refresh`.
@@ -181,19 +181,19 @@ Notes:
 
 ## Auto-start Services
 
-`fs-jira` can auto-mount at login with a single per-user service instance:
+`jirafs` can auto-mount at login with a single per-user service instance:
 
-- Linux: `systemd --user` unit `fs-jira.service`
-- macOS: launchd LaunchAgent `com.fs-jira.mount`
+- Linux: `systemd --user` unit `jirafs.service`
+- macOS: launchd LaunchAgent `com.jirafs.mount`
 
-Default service mountpoint is `~/fs-jira`.
+Default service mountpoint is `~/jirafs`.
 
 Prerequisites:
 
 1. Binary is installed and on `PATH`: `just install`
 2. Config exists and is valid at one of:
-   - `$XDG_CONFIG_HOME/fs-jira/config.toml`
-   - `~/.config/fs-jira/config.toml`
+   - `$XDG_CONFIG_HOME/jirafs/config.toml`
+   - `~/.config/jirafs/config.toml`
 
 Install service files:
 
@@ -204,7 +204,7 @@ just service-install
 Optional explicit paths:
 
 ```bash
-just service-install ~/fs-jira /path/to/config.toml
+just service-install ~/jirafs /path/to/config.toml
 ```
 
 Enable/start at login:
@@ -246,16 +246,16 @@ just service-uninstall
 Troubleshooting:
 
 - `config file not found`: create config with `just install` or pass explicit path to `just service-install <mountpoint> <config_path>`.
-- `fs-jira binary not found`: run `just install` and ensure your shell `PATH` includes Cargo install location.
+- `jirafs binary not found`: run `just install` and ensure your shell `PATH` includes Cargo install location.
 - stale mountpoint: unmount manually, then restart service.
-- prefer stable mount paths (like `~/fs-jira`) for services; avoid `/tmp` for login-persistent mounts.
+- prefer stable mount paths (like `~/jirafs`) for services; avoid `/tmp` for login-persistent mounts.
 
 ## Unmount
 
 Linux:
 
 ```bash
-fusermount3 -u /tmp/fs-jira-mnt
+fusermount3 -u /tmp/jirafs-mnt
 ```
 
 If your distro provides `fusermount` instead of `fusermount3`, use that command.
@@ -263,7 +263,7 @@ If your distro provides `fusermount` instead of `fusermount3`, use that command.
 macOS:
 
 ```bash
-umount /tmp/fs-jira-mnt
+umount /tmp/jirafs-mnt
 ```
 
 ## Desktop App (Tauri)
@@ -285,8 +285,8 @@ npm --prefix apps/desktop run tauri:dev
 
 After `just install`, launch the desktop UI with:
 
-- Linux: app launcher entry `fs-jira Desktop` (or `~/.local/bin/fs-jira-desktop`)
-- macOS: `~/Applications/fs-jira Desktop.app`
+- Linux: app launcher entry `jirafs Desktop` (or `~/.local/bin/jirafs-desktop`)
+- macOS: `~/Applications/jirafs Desktop.app`
 
 Desktop checks:
 

@@ -254,7 +254,7 @@ Introduce maintainable API docs and codify lint/test commands as project guardra
 **Changes**: Add crate/module-level docs and ensure exported modules are documented.
 
 ```rust
-//! fs-jira exposes cache, Jira API, rendering, and FUSE filesystem modules.
+//! jirafs exposes cache, Jira API, rendering, and FUSE filesystem modules.
 //! It provides a read-only Jira-backed filesystem interface.
 ```
 
@@ -327,7 +327,7 @@ pub fn get_issue(&self, issue_key: &str) -> Result<IssueData, JiraError> { ... }
 
 ## References
 
-- Prior bootstrap implementation plan: `thoughts/shared/plans/2026-02-21-fs-jira-rust-bootstrap.md`
+- Prior bootstrap implementation plan: `thoughts/shared/plans/2026-02-21-jirafs-rust-bootstrap.md`
 - Warmup/cache behavior research: `thoughts/shared/research/2026-02-22-ticket-cache-pre-warming.md`
 - Audit-derived blocking lint findings: `src/cache.rs:293`, `src/cache/persistent.rs:304`, `src/render.rs:72`, `src/render.rs:244`
 - Export surface requiring docs baseline: `src/lib.rs:1`

@@ -10,7 +10,7 @@ jql = "project in (PROJ, OPS) ORDER BY updated DESC"
 jql = "project = OPS ORDER BY updated DESC"
 
 [cache]
-db_path = "/tmp/fs-jira-cache.db"
+db_path = "/tmp/jirafs-cache.db"
 ttl_secs = 30
 
 [sync]

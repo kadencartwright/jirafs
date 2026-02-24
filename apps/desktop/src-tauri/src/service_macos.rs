@@ -8,7 +8,7 @@ use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::thread;
 use std::time::Duration;
 
-const LAUNCHD_LABEL: &str = "com.fs-jira.mount";
+const LAUNCHD_LABEL: &str = "com.jirafs.mount";
 
 pub fn probe_service() -> Result<ServiceProbe, ServiceProbeError> {
     let plist_path = resolve_plist_path();
@@ -146,11 +146,11 @@ pub fn spawn_log_collector(logs: LogBufferState, shutdown: Arc<AtomicBool>) {
         let out_log = PathBuf::from(&home)
             .join("Library")
             .join("Logs")
-            .join("fs-jira.log");
+            .join("jirafs.log");
         let err_log = PathBuf::from(&home)
             .join("Library")
             .join("Logs")
-            .join("fs-jira.err.log");
+            .join("jirafs.err.log");
 
         let out_log_str = out_log.to_string_lossy().to_string();
         let err_log_str = err_log.to_string_lossy().to_string();
@@ -187,9 +187,9 @@ pub fn spawn_log_collector(logs: LogBufferState, shutdown: Arc<AtomicBool>) {
                 Ok(_) => {
                     let trimmed = line.trim_end();
                     if trimmed.starts_with("==>") && trimmed.ends_with("<==") {
-                        if trimmed.contains("fs-jira.err.log") {
+                        if trimmed.contains("jirafs.err.log") {
                             source = "stderr".to_string();
-                        } else if trimmed.contains("fs-jira.log") {
+                        } else if trimmed.contains("jirafs.log") {
                             source = "stdout".to_string();
                         }
                         continue;
@@ -213,7 +213,7 @@ fn resolve_plist_path() -> PathBuf {
     PathBuf::from(home)
         .join("Library")
         .join("LaunchAgents")
-        .join("com.fs-jira.mount.plist")
+        .join("com.jirafs.mount.plist")
 }
 
 fn nix_like_uid() -> String {
@@ -270,15 +270,15 @@ mod tests {
         let content = r#"
 <key>ProgramArguments</key>
 <array>
-  <string>/usr/local/bin/fs-jira</string>
+  <string>/usr/local/bin/jirafs</string>
   <string>--config</string>
   <string>/tmp/config.toml</string>
-  <string>/tmp/fs-jira</string>
+  <string>/tmp/jirafs</string>
 </array>
 "#;
 
         let (config, mountpoint) = parse_program_arguments(content);
         assert_eq!(config.as_deref(), Some("/tmp/config.toml"));
-        assert_eq!(mountpoint.as_deref(), Some("/tmp/fs-jira"));
+        assert_eq!(mountpoint.as_deref(), Some("/tmp/jirafs"));
     }
 }

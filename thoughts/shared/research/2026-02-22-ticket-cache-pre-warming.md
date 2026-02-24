@@ -3,7 +3,7 @@ date: 2026-02-22T12:00:00Z
 researcher: k
 git_commit: 62d9e51f8f8f85dae7e16ec09e98d4ac2b914724
 branch: main
-repository: fs-jira
+repository: jirafs
 topic: "How ticket caches are pre-warmed"
 tags: [research, codebase, caching, warmup, fuse, jira]
 status: complete
@@ -11,21 +11,21 @@ last_updated: 2026-02-22
 last_updated_by: k
 ---
 
-# Research: Ticket Cache Pre-warming in fs-jira
+# Research: Ticket Cache Pre-warming in jirafs
 
 **Date**: 2026-02-22T12:00:00Z
 **Researcher**: k
 **Git Commit**: 62d9e51f8f8f85dae7e16ec09e98d4ac2b914724
 **Branch**: main
-**Repository**: fs-jira
+**Repository**: jirafs
 
 ## Research Question
 
-How does the fs-jira FUSE filesystem pre-warm ticket caches at startup?
+How does the jirafs FUSE filesystem pre-warm ticket caches at startup?
 
 ## Summary
 
-The fs-jira Rust FUSE filesystem implements a two-phase cache pre-warming strategy at startup:
+The jirafs Rust FUSE filesystem implements a two-phase cache pre-warming strategy at startup:
 1. **Project listing seeding** - Fetches all issue references for configured projects
 2. **Recent issue warming** - Prefetches the most recently updated issues up to a configurable budget
 
@@ -130,12 +130,12 @@ Configuration via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FS_JIRA_WARMUP_BUDGET` | 0 | Number of recent issues to prefetch |
-| `FS_JIRA_CACHE_DB` | (none) | Enable SQLite persistence |
+| `JIRAFS_WARMUP_BUDGET` | 0 | Number of recent issues to prefetch |
+| `JIRAFS_CACHE_DB` | (none) | Enable SQLite persistence |
 | `JIRA_CACHE_TTL_SECS` | 30 | Cache TTL for both projects and issues |
 
 ```rust
-let warmup_budget = env_usize("FS_JIRA_WARMUP_BUDGET", 0);
+let warmup_budget = env_usize("JIRAFS_WARMUP_BUDGET", 0);
 // ...
 if warmup_budget > 0 {
     let warmed = warm_recent_issues(&jira, &cache, &projects, warmup_budget);
@@ -219,7 +219,7 @@ fuser::mount2(fs, mountpoint_path, &config)?;
 
 ## Architecture Insights
 
-1. **Budget-limited prefetch** - The `FS_JIRA_WARMUP_BUDGET` prevents overwhelming the Jira API (default 0, recommended 25)
+1. **Budget-limited prefetch** - The `JIRAFS_WARMUP_BUDGET` prevents overwhelming the Jira API (default 0, recommended 25)
 
 2. **Freshness-first sorting** - Issues are sorted by `updated` timestamp so most-relevant tickets are warmed first
 
@@ -231,7 +231,7 @@ fuser::mount2(fs, mountpoint_path, &config)?;
 
 ## Historical Context (from thoughts/)
 
-- `thoughts/shared/plans/2026-02-21-fs-jira-rust-bootstrap.md:253` - Plan specifies "Prefer cache correctness and resilience over aggressive prefetch volume"
+- `thoughts/shared/plans/2026-02-21-jirafs-rust-bootstrap.md:253` - Plan specifies "Prefer cache correctness and resilience over aggressive prefetch volume"
 
 ## Related Research
 

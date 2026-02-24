@@ -1,10 +1,10 @@
 [package]
-name = "fs-jira-desktop"
+name = "jirafs-desktop"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "fs_jira_desktop_lib"
+name = "jirafs_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -17,5 +17,5 @@ tauri = { version = "2.2.5", features = ["tray-icon"] }
 wait-timeout = "0.2"
 shlex = "1.3"
 libc = "0.2"
-fs-jira = { path = "../../.." }
+jirafs = { path = "../../.." }
 toml = "0.8"

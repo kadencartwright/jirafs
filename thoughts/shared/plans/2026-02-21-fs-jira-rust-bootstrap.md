@@ -59,7 +59,7 @@ Create a Rust project that mounts a read-only filesystem exposing exactly one fi
 
 ```toml
 [package]
-name = "fs-jira"
+name = "jirafs"
 version = "0.1.0"
 edition = "2021"
 

@@ -10,7 +10,7 @@ use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::thread;
 use std::time::Duration;
 
-const SYSTEMD_UNIT_NAME: &str = "fs-jira.service";
+const SYSTEMD_UNIT_NAME: &str = "jirafs.service";
 
 pub fn probe_service() -> Result<ServiceProbe, ServiceProbeError> {
     let unit_path = resolve_unit_path();
@@ -211,7 +211,7 @@ pub fn parse_exec_start_args(unit_content: &str) -> (Option<String>, Option<Stri
 
         if mountpoint
             .as_deref()
-            .is_some_and(|value| value.ends_with("fs-jira"))
+            .is_some_and(|value| value.ends_with("jirafs"))
         {
             return (config_path, mountpoint);
         }
@@ -228,9 +228,9 @@ mod tests {
     fn parses_systemd_exec_start_args() {
         let content = r#"
 [Unit]
-Description=fs-jira FUSE mount
+Description=jirafs FUSE mount
 [Service]
-ExecStart=/usr/local/bin/fs-jira --config /tmp/config.toml /tmp/mount
+ExecStart=/usr/local/bin/jirafs --config /tmp/config.toml /tmp/mount
 "#;
         let (config, mountpoint) = parse_exec_start_args(content);
         assert_eq!(config.as_deref(), Some("/tmp/config.toml"));

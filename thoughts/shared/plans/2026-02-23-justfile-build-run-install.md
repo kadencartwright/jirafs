@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a root `Justfile` that provides stable developer entrypoints for building, running, and installing `fs-jira`, and ensure `install` bootstraps a default TOML config in the exact runtime lookup location.
+Add a root `Justfile` that provides stable developer entrypoints for building, running, and installing `jirafs`, and ensure `install` bootstraps a default TOML config in the exact runtime lookup location.
 
 The install flow will be non-destructive: it must refuse to overwrite an existing config file.
 
@@ -10,9 +10,9 @@ The install flow will be non-destructive: it must refuse to overwrite an existin
 
 The repository currently documents Cargo-first workflows (`cargo build`, `cargo run`) and quality gates in README and CI, but has no task runner wrapper like `Justfile` or `Makefile` (`README.md:19`, `.github/workflows/ci.yml:34`).
 
-Config path behavior is already explicitly implemented in Rust: prefer `$XDG_CONFIG_HOME/fs-jira/config.toml`, otherwise fallback to `$HOME/.config/fs-jira/config.toml`, and error if neither env var is usable (`src/config.rs:146`, `src/config.rs:156`, `src/config.rs:163`).
+Config path behavior is already explicitly implemented in Rust: prefer `$XDG_CONFIG_HOME/jirafs/config.toml`, otherwise fallback to `$HOME/.config/jirafs/config.toml`, and error if neither env var is usable (`src/config.rs:146`, `src/config.rs:156`, `src/config.rs:163`).
 
-README currently shows manual config bootstrap with `mkdir -p` and `cp config.example.toml` into `~/.config/fs-jira/config.toml` (`README.md:53`, `README.md:54`).
+README currently shows manual config bootstrap with `mkdir -p` and `cp config.example.toml` into `~/.config/jirafs/config.toml` (`README.md:53`, `README.md:54`).
 
 ## Desired End State
 
@@ -60,7 +60,7 @@ default:
 build:
     cargo build --locked
 
-run mountpoint="/tmp/fs-jira-mnt":
+run mountpoint="/tmp/jirafs-mnt":
     mkdir -p "{{mountpoint}}"
     cargo run -- "{{mountpoint}}"
 ```
@@ -70,7 +70,7 @@ run mountpoint="/tmp/fs-jira-mnt":
 **Changes**: Add a recipe that uses `--config` for explicit-path runs so local testing can mirror docs.
 
 ```just
-run-with-config config_path mountpoint="/tmp/fs-jira-mnt":
+run-with-config config_path mountpoint="/tmp/jirafs-mnt":
     mkdir -p "{{mountpoint}}"
     cargo run -- --config "{{config_path}}" "{{mountpoint}}"
 ```
@@ -80,7 +80,7 @@ run-with-config config_path mountpoint="/tmp/fs-jira-mnt":
 #### Automated Verification:
 - [ ] `Justfile` parses and lists recipes: `just --list`
 - [ ] Build recipe compiles successfully: `just build`
-- [ ] Run recipe command renders expected usage when mountpoint omitted/invalid conditions are simulated: `just run /tmp/fs-jira-mnt`
+- [ ] Run recipe command renders expected usage when mountpoint omitted/invalid conditions are simulated: `just run /tmp/jirafs-mnt`
 - [ ] Existing quality checks still pass: `cargo fmt --check && cargo clippy --all-targets --all-features --locked -- -D warnings && cargo test --all-targets --all-features --locked`
 
 #### Manual Verification:
@@ -108,9 +108,9 @@ Add `install` recipe that installs the binary and creates default config in the 
 install:
     cargo install --path . --locked
     if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-      config_dir="${XDG_CONFIG_HOME}/fs-jira";
+      config_dir="${XDG_CONFIG_HOME}/jirafs";
     elif [ -n "${HOME:-}" ]; then
-      config_dir="${HOME}/.config/fs-jira";
+      config_dir="${HOME}/.config/jirafs";
     else
       echo "failed to resolve config path: HOME is not set and XDG_CONFIG_HOME is unset" >&2;
       exit 1;
@@ -141,7 +141,7 @@ install:
 - [ ] `config.example.toml` remains valid for runtime parser: `cargo test --locked config_example_parses`
 
 #### Manual Verification:
-- [ ] `which fs-jira` (or equivalent) resolves installed binary after install
+- [ ] `which jirafs` (or equivalent) resolves installed binary after install
 - [ ] Generated config file appears at expected location and contains example content
 - [ ] Existing custom config is preserved because overwrite is refused
 - [ ] Error message clearly tells user why install failed and where config exists
@@ -200,8 +200,8 @@ Finalize docs and add lightweight regression coverage for the new workflow so co
 ### Manual Testing Steps:
 1. In a clean shell, run `just install` and confirm binary install + config creation.
 2. Re-run `just install` and confirm it exits non-zero with overwrite refusal message.
-3. Set `XDG_CONFIG_HOME=/tmp/fs-jira-xdg`, run `just install`, verify `/tmp/fs-jira-xdg/fs-jira/config.toml`.
-4. Run `just run /tmp/fs-jira-mnt` and verify startup proceeds with installed/default config expectations.
+3. Set `XDG_CONFIG_HOME=/tmp/jirafs-xdg`, run `just install`, verify `/tmp/jirafs-xdg/jirafs/config.toml`.
+4. Run `just run /tmp/jirafs-mnt` and verify startup proceeds with installed/default config expectations.
 
 ## Performance Considerations
 

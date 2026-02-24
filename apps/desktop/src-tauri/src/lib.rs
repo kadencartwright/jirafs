@@ -6,7 +6,7 @@ mod service_macos;
 mod sync_meta;
 
 use errors::{ServiceProbeError, ServiceProbeErrorKind};
-use fs_jira::jira::JiraClient;
+use jirafs::jira::JiraClient;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex};
@@ -264,7 +264,7 @@ fn get_session_logs(state: State<DesktopState>) -> Result<Vec<LogLineDto>, Strin
 #[tauri::command]
 fn get_workspace_jql_config() -> Result<Vec<WorkspaceJqlInputDto>, String> {
     let path = resolve_effective_config_path()?;
-    let config = fs_jira::config::load_from(&path).map_err(|error| error.to_string())?;
+    let config = jirafs::config::load_from(&path).map_err(|error| error.to_string())?;
 
     let mut rows = config
         .jira
@@ -314,7 +314,7 @@ fn save_workspace_jql_config(workspaces: Vec<WorkspaceJqlInputDto>) -> Result<()
 
     let path = resolve_effective_config_path()?;
     persist_workspace_jql_config(&path, &normalized)?;
-    fs_jira::config::load_from(&path).map_err(|error| error.to_string())?;
+    jirafs::config::load_from(&path).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -323,7 +323,7 @@ fn validate_workspace_jqls_inner(
 ) -> Result<Vec<WorkspaceJqlValidationDto>, String> {
     let normalized = normalize_workspace_inputs(workspaces)?;
     let path = resolve_effective_config_path()?;
-    let config = fs_jira::config::load_from(&path).map_err(|error| error.to_string())?;
+    let config = jirafs::config::load_from(&path).map_err(|error| error.to_string())?;
     let jira = JiraClient::new(
         config.jira.base_url,
         config.jira.email,
@@ -383,7 +383,7 @@ fn resolve_effective_config_path() -> Result<PathBuf, String> {
     if let Some(path) = status.config_path {
         return Ok(PathBuf::from(path));
     }
-    fs_jira::config::resolve_config_path().map_err(|error| error.to_string())
+    jirafs::config::resolve_config_path().map_err(|error| error.to_string())
 }
 
 fn persist_workspace_jql_config(
@@ -467,7 +467,7 @@ fn compute_status() -> Result<AppStatusDto, String> {
     }
 
     if config_path.is_none() {
-        config_path = fs_jira::config::resolve_config_path()
+        config_path = jirafs::config::resolve_config_path()
             .ok()
             .map(|path| path.to_string_lossy().to_string());
         path_source = PathSource::ConfigResolver;
@@ -526,7 +526,7 @@ fn known_default_mountpoint() -> Option<String> {
     let home = std::env::var_os("HOME")?;
     Some(
         PathBuf::from(home)
-            .join("fs-jira")
+            .join("jirafs")
             .to_string_lossy()
             .to_string(),
     )
@@ -612,7 +612,7 @@ fn spawn_session_log_collector(_logs: LogBufferState, _shutdown: Arc<AtomicBool>
 fn update_tray_tooltip(app: &AppHandle, status: &AppStatusDto) {
     if let Some(tray) = app.tray_by_id("main") {
         let tooltip = format!(
-            "fs-jira: {:?} (service: {})",
+            "jirafs: {:?} (service: {})",
             status.sync_state, status.service_running
         );
         let _ = tray.set_tooltip(Some(tooltip));
@@ -644,7 +644,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     )?;
 
     TrayIconBuilder::with_id("main")
-        .tooltip("fs-jira: starting")
+        .tooltip("jirafs: starting")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
@@ -744,7 +744,7 @@ mod tests {
     #[test]
     fn persist_workspace_jql_rewrites_only_workspace_map() {
         let tmp =
-            std::env::temp_dir().join(format!("fs-jira-workspaces-{}.toml", std::process::id()));
+            std::env::temp_dir().join(format!("jirafs-workspaces-{}.toml", std::process::id()));
 
         let raw = r#"
 [jira]
@@ -776,12 +776,12 @@ debug = false
         }];
 
         persist_workspace_jql_config(&tmp, &workspaces).expect("workspace update should succeed");
-        let loaded = fs_jira::config::load_from(&tmp).expect("updated config should parse");
+        let loaded = jirafs::config::load_from(&tmp).expect("updated config should parse");
 
         assert_eq!(loaded.cache.db_path, "/tmp/cache.db");
         assert_eq!(loaded.sync.budget, 10);
         assert_eq!(loaded.metrics.interval_secs, 60);
-        assert_eq!(loaded.logging.debug, false);
+        assert!(!loaded.logging.debug);
         assert_eq!(loaded.jira.workspaces.len(), 1);
         assert_eq!(
             loaded

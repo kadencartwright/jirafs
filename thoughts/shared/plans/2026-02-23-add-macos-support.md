@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add first-class macOS support for `fs-jira` so contributors can build, run, mount, and unmount the filesystem on both Linux and macOS with one documented workflow and platform-aware validation.
+Add first-class macOS support for `jirafs` so contributors can build, run, mount, and unmount the filesystem on both Linux and macOS with one documented workflow and platform-aware validation.
 
 ## Current State Analysis
 
@@ -16,7 +16,7 @@ The core filesystem implementation is mostly platform-neutral, but project ergon
 
 ## Desired End State
 
-`fs-jira` is treated as Linux+macOS supported with explicit install/run/unmount docs, platform-aware mount configuration decisions, and automated checks for both OS families.
+`jirafs` is treated as Linux+macOS supported with explicit install/run/unmount docs, platform-aware mount configuration decisions, and automated checks for both OS families.
 
 ### Key Discoveries:
 - `fuser` already contains macOS-specific support paths and feature gates, including macFUSE compatibility (`/home/k/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fuser-0.17.0/Cargo.toml:66`, `/home/k/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fuser-0.17.0/build.rs:16`).
@@ -73,10 +73,10 @@ Make setup and operational guidance explicitly dual-platform so macOS users can 
 
 ```markdown
 ### Unmount (Linux)
-fusermount3 -u /tmp/fs-jira-mnt
+fusermount3 -u /tmp/jirafs-mnt
 
 ### Unmount (macOS)
-umount /tmp/fs-jira-mnt
+umount /tmp/jirafs-mnt
 ```
 
 ### Success Criteria:
@@ -109,12 +109,12 @@ Ensure the mount bootstrap path is explicit about cross-platform behavior and av
 ```rust
 fn mount_options() -> Vec<MountOption> {
     let mut options = vec![
-        MountOption::FSName("fs-jira".to_string()),
+        MountOption::FSName("jirafs".to_string()),
         MountOption::DefaultPermissions,
     ];
     if cfg!(target_os = "macos") {
         options.push(MountOption::RO);
-        // optional: options.push(MountOption::CUSTOM("volname=fs-jira".to_string()));
+        // optional: options.push(MountOption::CUSTOM("volname=jirafs".to_string()));
     }
     options
 }
@@ -136,7 +136,7 @@ config.mount_options.extend(mount_options());
 #[test]
 fn mount_options_include_fsname_and_default_permissions() {
     let options = mount_options();
-    assert!(options.contains(&MountOption::FSName("fs-jira".to_string())));
+    assert!(options.contains(&MountOption::FSName("jirafs".to_string())));
     assert!(options.contains(&MountOption::DefaultPermissions));
 }
 ```
@@ -219,10 +219,10 @@ steps:
 - Add CI-level cross-platform compile checks to prevent OS-specific breakage in `main`/mount plumbing.
 
 ### Manual Testing Steps:
-1. On macOS, install macFUSE + pkg-config and run `cargo run -- /tmp/fs-jira-mnt`.
-2. Verify `ls /tmp/fs-jira-mnt`, `ls /tmp/fs-jira-mnt/projects`, and `cat` on an issue file.
+1. On macOS, install macFUSE + pkg-config and run `cargo run -- /tmp/jirafs-mnt`.
+2. Verify `ls /tmp/jirafs-mnt`, `ls /tmp/jirafs-mnt/projects`, and `cat` on an issue file.
 3. Trigger manual sync via `.sync_meta/manual_refresh` write and verify sync metadata updates.
-4. Unmount with `umount /tmp/fs-jira-mnt` and remount once.
+4. Unmount with `umount /tmp/jirafs-mnt` and remount once.
 
 ## Performance Considerations
 

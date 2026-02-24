@@ -1,4 +1,4 @@
-//! `fs-jira` exposes cache, Jira API, rendering, and FUSE filesystem modules.
+//! `jirafs` exposes cache, Jira API, rendering, and FUSE filesystem modules.
 //! It provides a read-only Jira-backed filesystem interface.
 
 /// In-memory cache and persistent cache integration.

@@ -1,12 +1,12 @@
-# fs-jira Tauri Desktop UI Implementation Plan
+# jirafs Tauri Desktop UI Implementation Plan
 
 ## Overview
 
-Build a separate Tauri desktop wrapper for `fs-jira` with a Linux system tray / macOS menubar presence, and a simple React config/status UI. The first version is intentionally operational (status + actions), not a full config editor.
+Build a separate Tauri desktop wrapper for `jirafs` with a Linux system tray / macOS menubar presence, and a simple React config/status UI. The first version is intentionally operational (status + actions), not a full config editor.
 
 ## Current State Analysis
 
-`fs-jira` already has the runtime primitives we need for a control UI, but no desktop surface:
+`jirafs` already has the runtime primitives we need for a control UI, but no desktop surface:
 
 - Runtime sync state is exposed through writable/readable control files under `.sync_meta` (`src/fs.rs:272`, `src/fs.rs:359`, `src/fs.rs:368`, `src/fs.rs:712`).
 - Manual resync and full resync are already implemented via writes to `.sync_meta/manual_refresh` and `.sync_meta/full_refresh` (`src/fs.rs:739`, `src/fs.rs:742`).
@@ -19,9 +19,9 @@ Build a separate Tauri desktop wrapper for `fs-jira` with a Linux system tray / 
 Add a new `apps/desktop` Tauri app that can run on Linux and macOS, display runtime status, show config + mount folder location, and trigger incremental/full sync actions against the mounted `.sync_meta` files.
 
 ### Key Discoveries:
-- Sync state and triggers are already externally controllable via filesystem operations, so no `fs-jira` core refactor is required (`src/fs.rs:272`, `src/fs.rs:737`).
-- Service files contain explicit startup arguments (`--config` and mountpoint), which can be parsed to discover folder/config locations (`deploy/systemd/fs-jira.service.tmpl:8`, `deploy/launchd/com.fs-jira.mount.plist.tmpl:11`).
-- A desktop wrapper aligns with current architecture because `fs-jira` is foreground/blocking and already service-managed (`src/main.rs:389`, `Justfile:17`).
+- Sync state and triggers are already externally controllable via filesystem operations, so no `jirafs` core refactor is required (`src/fs.rs:272`, `src/fs.rs:737`).
+- Service files contain explicit startup arguments (`--config` and mountpoint), which can be parsed to discover folder/config locations (`deploy/systemd/jirafs.service.tmpl:8`, `deploy/launchd/com.jirafs.mount.plist.tmpl:11`).
+- A desktop wrapper aligns with current architecture because `jirafs` is foreground/blocking and already service-managed (`src/main.rs:389`, `Justfile:17`).
 
 ### End State Verification
 
@@ -33,7 +33,7 @@ Add a new `apps/desktop` Tauri app that can run on Linux and macOS, display runt
 ## What We're NOT Doing
 
 - No in-UI editing/saving of TOML config values in this iteration.
-- No replacement of existing `fs-jira` runtime/service architecture.
+- No replacement of existing `jirafs` runtime/service architecture.
 - No Windows support.
 - No binary packaging/notarization/distribution workflow.
 - No redesign of FUSE or sync internals.
@@ -76,7 +76,7 @@ Create a new Tauri + React + TypeScript workspace with Tailwind, shadcn/ui, and 
 
 ```json
 {
-  "name": "fs-jira-desktop",
+  "name": "jirafs-desktop",
   "private": true,
   "scripts": {
     "dev": "vite",
@@ -190,7 +190,7 @@ fn trigger_sync(kind: String) -> Result<TriggerSyncResultDto, String> { /* ... *
 
 Path discovery precedence (consistent on both platforms):
 1. Parse service arguments (`--config` and mountpoint) from unit/plist.
-2. If absent, use known service defaults (for example `~/fs-jira` mountpoint).
+2. If absent, use known service defaults (for example `~/jirafs` mountpoint).
 3. If still unresolved, use runtime-equivalent config resolver logic (`src/config.rs:146`).
 
 Include `path_source` in `AppStatusDto` (`service_args`, `known_defaults`, `config_resolver`) for debugging and UI diagnostics.
@@ -389,7 +389,7 @@ jobs:
 - Frontend component tests for action-disabled states and error banners (if test harness is added).
 
 ### Manual Testing Steps:
-1. Start `fs-jira` service and verify status fields populate.
+1. Start `jirafs` service and verify status fields populate.
 2. Trigger `Resync`; verify sync-in-progress state and subsequent completion state.
 3. Trigger `Full Resync`; verify confirmation gate and completion state.
 4. Stop service; verify UI moves to stopped/degraded state and actions fail gracefully.
@@ -403,7 +403,7 @@ jobs:
 
 ## Migration Notes
 
-- No migration needed for existing `fs-jira` runtime users.
+- No migration needed for existing `jirafs` runtime users.
 - Desktop app is additive and optional.
 - Existing `just` service workflows remain source of truth for install/enable/disable.
 
@@ -413,5 +413,5 @@ jobs:
 - Manual/full sync triggers: `src/fs.rs:737`
 - Service management recipes: `Justfile:17`
 - Config path precedence: `src/config.rs:146`
-- systemd service template: `deploy/systemd/fs-jira.service.tmpl:8`
-- launchd service template: `deploy/launchd/com.fs-jira.mount.plist.tmpl:11`
+- systemd service template: `deploy/systemd/jirafs.service.tmpl:8`
+- launchd service template: `deploy/launchd/com.jirafs.mount.plist.tmpl:11`

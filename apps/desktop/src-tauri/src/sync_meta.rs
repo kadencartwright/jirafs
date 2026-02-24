@@ -92,7 +92,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time moved backwards")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("fs-jira-desktop-sync-meta-{unique}"));
+        let path = std::env::temp_dir().join(format!("jirafs-desktop-sync-meta-{unique}"));
         std::fs::create_dir_all(&path).expect("create fixture path");
         path
     }

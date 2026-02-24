@@ -521,7 +521,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs-jira"
+name = "jirafs"
 version = "0.1.0"
 dependencies = [
  "chrono",

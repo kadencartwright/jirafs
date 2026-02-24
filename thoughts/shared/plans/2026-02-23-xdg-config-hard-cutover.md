@@ -2,23 +2,23 @@
 
 ## Overview
 
-Replace all runtime environment-variable configuration with a single TOML config file loaded from the XDG config location: `$XDG_CONFIG_HOME/fs-jira/config.toml` or `~/.config/fs-jira/config.toml` when `XDG_CONFIG_HOME` is unset.
+Replace all runtime environment-variable configuration with a single TOML config file loaded from the XDG config location: `$XDG_CONFIG_HOME/jirafs/config.toml` or `~/.config/jirafs/config.toml` when `XDG_CONFIG_HOME` is unset.
 
 This is a hard cutover: no environment-variable fallback at runtime.
 
 ## Current State Analysis
 
-`fs-jira` currently initializes all runtime settings from environment variables in `main`, with required keys (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECTS`) and optional tuning keys (`JIRA_CACHE_TTL_SECS`, `FS_JIRA_SYNC_BUDGET`, `FS_JIRA_SYNC_INTERVAL_SECS`, `FS_JIRA_METRICS_INTERVAL_SECS`, `FS_JIRA_CACHE_DB`) (`src/main.rs:140`, `src/main.rs:171`).
+`jirafs` currently initializes all runtime settings from environment variables in `main`, with required keys (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECTS`) and optional tuning keys (`JIRA_CACHE_TTL_SECS`, `JIRAFS_SYNC_BUDGET`, `JIRAFS_SYNC_INTERVAL_SECS`, `JIRAFS_METRICS_INTERVAL_SECS`, `JIRAFS_CACHE_DB`) (`src/main.rs:140`, `src/main.rs:171`).
 
 Startup also auto-loads `.env` via `dotenvy`, reinforcing env-vars as the primary source (`src/main.rs:121`).
 
-Debug logging is independently env-driven (`FS_JIRA_DEBUG`) via `OnceLock`, not through a centralized runtime config object (`src/logging.rs:4`, `src/logging.rs:8`).
+Debug logging is independently env-driven (`JIRAFS_DEBUG`) via `OnceLock`, not through a centralized runtime config object (`src/logging.rs:4`, `src/logging.rs:8`).
 
 There is currently no config file parser, no typed app config model, and no XDG path resolution logic in `src/`.
 
 ## Desired End State
 
-At process startup, `fs-jira` resolves and reads exactly one config file from the XDG config directory, validates it, and uses it as the sole configuration source for runtime behavior.
+At process startup, `jirafs` resolves and reads exactly one config file from the XDG config directory, validates it, and uses it as the sole configuration source for runtime behavior.
 
 The binary fails fast with actionable error messages if the config file is missing or invalid.
 
@@ -89,7 +89,7 @@ toml = "0.8"
 ```
 
 #### 4. Config Fixture for Developer Onboarding
-**File**: `.config/fs-jira/config.toml.example` (or `config.example.toml` in repo root)
+**File**: `.config/jirafs/config.toml.example` (or `config.example.toml` in repo root)
 **Changes**: Provide canonical template for required/optional keys and defaults.
 
 ```toml
@@ -100,7 +100,7 @@ api_token = "your_api_token_here"
 projects = ["PROJ", "OPS"]
 
 [cache]
-db_path = "/tmp/fs-jira-cache.db"
+db_path = "/tmp/jirafs-cache.db"
 ttl_secs = 30
 
 [sync]
@@ -123,8 +123,8 @@ debug = false
 - [ ] Linting passes: `cargo clippy --all-targets --all-features --locked -- -D warnings`
 
 #### Manual Verification:
-- [ ] Config path resolves to `$XDG_CONFIG_HOME/fs-jira/config.toml` when `XDG_CONFIG_HOME` is set
-- [ ] Config path resolves to `~/.config/fs-jira/config.toml` when `XDG_CONFIG_HOME` is unset
+- [ ] Config path resolves to `$XDG_CONFIG_HOME/jirafs/config.toml` when `XDG_CONFIG_HOME` is set
+- [ ] Config path resolves to `~/.config/jirafs/config.toml` when `XDG_CONFIG_HOME` is unset
 - [ ] Missing config file error message clearly states expected absolute path
 - [ ] Invalid TOML and invalid semantic values produce actionable startup errors
 
@@ -144,7 +144,7 @@ Switch runtime initialization to use `AppConfig` only; remove all env-var reads 
 **Changes**: Replace `required_env`, `env_u64`, `env_usize`, and direct env reads with config object fields; remove `dotenvy::dotenv()`.
 
 ```rust
-let app_config = fs_jira::config::load()?;
+let app_config = jirafs::config::load()?;
 
 let jira = Arc::new(JiraClient::new_with_metrics(
     app_config.jira.base_url.clone(),
@@ -242,7 +242,7 @@ Update repository documentation and tests so new users configure via `config.tom
 - Mount option behavior remains unchanged after startup refactor.
 
 ### Manual Testing Steps:
-1. Create `~/.config/fs-jira/config.toml` from example and run `cargo run -- /tmp/fs-jira-mnt`.
+1. Create `~/.config/jirafs/config.toml` from example and run `cargo run -- /tmp/jirafs-mnt`.
 2. Validate filesystem output for configured projects and issue markdown retrieval.
 3. Toggle `logging.debug` and confirm debug log visibility changes.
 4. Temporarily break config (e.g., remove `jira.api_token`) and verify fail-fast error quality.
@@ -262,11 +262,11 @@ Update repository documentation and tests so new users configure via `config.tom
   - `JIRA_API_TOKEN` -> `jira.api_token`
   - `JIRA_PROJECTS` -> `jira.projects` (array)
   - `JIRA_CACHE_TTL_SECS` -> `cache.ttl_secs`
-  - `FS_JIRA_CACHE_DB` -> `cache.db_path`
-  - `FS_JIRA_SYNC_BUDGET` -> `sync.budget`
-  - `FS_JIRA_SYNC_INTERVAL_SECS` -> `sync.interval_secs`
-  - `FS_JIRA_METRICS_INTERVAL_SECS` -> `metrics.interval_secs`
-  - `FS_JIRA_DEBUG` -> `logging.debug`
+  - `JIRAFS_CACHE_DB` -> `cache.db_path`
+  - `JIRAFS_SYNC_BUDGET` -> `sync.budget`
+  - `JIRAFS_SYNC_INTERVAL_SECS` -> `sync.interval_secs`
+  - `JIRAFS_METRICS_INTERVAL_SECS` -> `metrics.interval_secs`
+  - `JIRAFS_DEBUG` -> `logging.debug`
 - Remove `.env` recommendation entirely from docs to avoid split-brain configuration.
 
 ## References

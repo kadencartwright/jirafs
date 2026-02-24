@@ -5,15 +5,15 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fs_jira::cache::InMemoryCache;
-use fs_jira::config::AppConfigOverrides;
-use fs_jira::fs::JiraFuseFs;
-use fs_jira::jira::JiraClient;
-use fs_jira::logging;
-use fs_jira::metrics::{spawn_metrics_logger, Metrics};
-use fs_jira::sync_state::SyncState;
-use fs_jira::warmup::sync_issues;
 use fuser::{Config, MountOption};
+use jirafs::cache::InMemoryCache;
+use jirafs::config::AppConfigOverrides;
+use jirafs::fs::JiraFuseFs;
+use jirafs::jira::JiraClient;
+use jirafs::logging;
+use jirafs::metrics::{spawn_metrics_logger, Metrics};
+use jirafs::sync_state::SyncState;
+use jirafs::warmup::sync_issues;
 
 const USAGE: &str = "usage: cargo run -- [flags] <mountpoint>\n\
 flags:\n\
@@ -69,7 +69,7 @@ fn parse_cli_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<Cli
                 overrides
                     .jira_workspaces
                     .get_or_insert_with(HashMap::new)
-                    .insert(name, fs_jira::config::WorkspaceConfig { jql });
+                    .insert(name, jirafs::config::WorkspaceConfig { jql });
             }
             "--cache-db-path" => {
                 overrides.cache_db_path = Some(next_string(&mut iter, "--cache-db-path")?);
@@ -246,7 +246,7 @@ fn spawn_periodic_sync(
 
 fn mount_options() -> Vec<MountOption> {
     let mut options = vec![
-        MountOption::FSName("fs-jira".to_string()),
+        MountOption::FSName("jirafs".to_string()),
         MountOption::DefaultPermissions,
     ];
 
@@ -270,9 +270,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut app_config = if let Some(config_path) = cli.config_path.as_deref() {
-        fs_jira::config::load_from(config_path)?
+        jirafs::config::load_from(config_path)?
     } else {
-        fs_jira::config::load()?
+        jirafs::config::load()?
     };
 
     app_config.apply_overrides(&cli.overrides)?;
@@ -308,7 +308,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Arc::new(Metrics::new());
 
     logging::info(format!(
-        "starting fs-jira workspaces={} ttl={}s sync_budget={} sync_interval={}s",
+        "starting jirafs workspaces={} ttl={}s sync_budget={} sync_interval={}s",
         workspaces
             .iter()
             .map(|(name, _)| name.as_str())
@@ -418,15 +418,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn cleanup_mountpoint(mountpoint: &Path) -> bool {
     #[cfg(target_os = "linux")]
     {
-        return run_cleanup_commands(
+        run_cleanup_commands(
             mountpoint,
             &[&["fusermount3", "-u"], &["fusermount", "-u"], &["umount"]],
-        );
+        )
     }
 
     #[cfg(target_os = "macos")]
     {
-        return run_cleanup_commands(mountpoint, &[&["umount"]]);
+        run_cleanup_commands(mountpoint, &[&["umount"]])
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -481,7 +481,7 @@ mod tests {
 
         assert!(options
             .iter()
-            .any(|option| matches!(option, MountOption::FSName(name) if name == "fs-jira")));
+            .any(|option| matches!(option, MountOption::FSName(name) if name == "jirafs")));
         assert!(options.contains(&MountOption::DefaultPermissions));
         assert!(!options.contains(&MountOption::RO));
     }
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn cli_parses_config_override_and_scalar_flags() {
         let args = vec![
-            OsString::from("fs-jira"),
+            OsString::from("jirafs"),
             OsString::from("-c"),
             OsString::from("/tmp/custom.toml"),
             OsString::from("--jira-base-url"),
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn cli_parses_repeatable_workspace_flags() {
         let args = vec![
-            OsString::from("fs-jira"),
+            OsString::from("jirafs"),
             OsString::from("--jira-workspace"),
             OsString::from("default=project in (PROJ, OPS) ORDER BY updated DESC"),
             OsString::from("--jira-workspace"),
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn cli_help_flag_returns_help_result() {
-        let args = vec![OsString::from("fs-jira"), OsString::from("--help")];
+        let args = vec![OsString::from("jirafs"), OsString::from("--help")];
         let result = parse_cli_args(args).expect("help should parse");
         assert!(result.is_none());
     }

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "fs-jira Desktop",
+  "productName": "jirafs Desktop",
   "version": "0.1.0",
-  "identifier": "com.fs-jira.desktop",
+  "identifier": "com.jirafs.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "fs-jira Desktop",
+        "title": "jirafs Desktop",
         "width": 960,
         "height": 720,
         "resizable": true

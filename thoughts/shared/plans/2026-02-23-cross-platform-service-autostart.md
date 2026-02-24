@@ -2,11 +2,11 @@
 
 ## Overview
 
-Add first-class user-session auto-launch support for `fs-jira` FUSE mounts on Linux (`systemd --user`) and macOS (`launchd` LaunchAgent), using the existing foreground runtime process and explicit service-managed startup arguments.
+Add first-class user-session auto-launch support for `jirafs` FUSE mounts on Linux (`systemd --user`) and macOS (`launchd` LaunchAgent), using the existing foreground runtime process and explicit service-managed startup arguments.
 
 ## Current State Analysis
 
-`fs-jira` already has stable mount/runtime primitives, but no service management surface:
+`jirafs` already has stable mount/runtime primitives, but no service management surface:
 
 - Runtime process entrypoint is CLI-first and foreground/blocking (`src/main.rs:39`, `src/main.rs:389`).
 - A mountpoint positional argument is required and auto-created if missing (`src/main.rs:123`, `src/main.rs:289`).
@@ -17,7 +17,7 @@ Add first-class user-session auto-launch support for `fs-jira` FUSE mounts on Li
 
 ## Desired End State
 
-Operators can install, enable, inspect, and remove a single user-level auto-start service instance for `fs-jira` on Linux and macOS from repo-native commands. Services start at login, run as the current user, and mount by default to `~/fs-jira` using explicit config and mountpoint arguments.
+Operators can install, enable, inspect, and remove a single user-level auto-start service instance for `jirafs` on Linux and macOS from repo-native commands. Services start at login, run as the current user, and mount by default to `~/jirafs` using explicit config and mountpoint arguments.
 
 ### Key Discoveries:
 - Foreground process model maps directly to service manager supervision; no daemonization refactor needed (`src/main.rs:389`).
@@ -29,7 +29,7 @@ Operators can install, enable, inspect, and remove a single user-level auto-star
 ### Verification of End State
 
 1. `just service-install` writes a valid user service file on Linux and macOS with resolved binary/config/mountpoint values.
-2. `just service-enable` starts service successfully and mount appears at `~/fs-jira`.
+2. `just service-enable` starts service successfully and mount appears at `~/jirafs`.
 3. `just service-status` and `just service-logs` provide actionable runtime diagnostics.
 4. `just service-disable` + `just service-uninstall` cleanly stop and remove managed service assets.
 
@@ -42,7 +42,7 @@ Operators can install, enable, inspect, and remove a single user-level auto-star
 
 ## Implementation Approach
 
-Add parameterized service templates and `Justfile` lifecycle recipes. Keep runtime stable by running the same binary/args path used today (`fs-jira --config <path> <mountpoint>`). Favor explicit absolute paths in generated service definitions to avoid environment drift.
+Add parameterized service templates and `Justfile` lifecycle recipes. Keep runtime stable by running the same binary/args path used today (`jirafs --config <path> <mountpoint>`). Favor explicit absolute paths in generated service definitions to avoid environment drift.
 
 ## Phase 1: Service Template Artifacts
 
@@ -53,12 +53,12 @@ Introduce versioned templates for Linux and macOS user-session service definitio
 ### Changes Required:
 
 #### 1. Add systemd user service template
-**File**: `deploy/systemd/fs-jira.service.tmpl`
+**File**: `deploy/systemd/jirafs.service.tmpl`
 **Changes**: Add a template with placeholders for absolute binary path, config path, and mountpoint.
 
 ```ini
 [Unit]
-Description=fs-jira FUSE mount
+Description=jirafs FUSE mount
 After=network-online.target
 
 [Service]
@@ -72,7 +72,7 @@ WantedBy=default.target
 ```
 
 #### 2. Add launchd LaunchAgent template
-**File**: `deploy/launchd/com.fs-jira.mount.plist.tmpl`
+**File**: `deploy/launchd/com.jirafs.mount.plist.tmpl`
 **Changes**: Add a template with `ProgramArguments`, `RunAtLoad`, and log file paths.
 
 ```xml
@@ -94,7 +94,7 @@ WantedBy=default.target
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Template files exist in repo: `test -f deploy/systemd/fs-jira.service.tmpl && test -f deploy/launchd/com.fs-jira.mount.plist.tmpl`
+- [ ] Template files exist in repo: `test -f deploy/systemd/jirafs.service.tmpl && test -f deploy/launchd/com.jirafs.mount.plist.tmpl`
 - [ ] Existing checks remain green: `cargo fmt --check && cargo clippy --all-targets --all-features --locked -- -D warnings && cargo test --all-targets --all-features --locked`
 
 #### Manual Verification:
@@ -115,33 +115,33 @@ Add cross-platform `just` recipes to install/enable/start/status/logs/stop/disab
 
 #### 1. Add common path-resolution helper logic in `Justfile`
 **File**: `Justfile`
-**Changes**: Resolve `BIN_PATH`, `CONFIG_PATH`, and default `MOUNTPOINT` (`~/fs-jira`) in shell-safe way with explicit errors.
+**Changes**: Resolve `BIN_PATH`, `CONFIG_PATH`, and default `MOUNTPOINT` (`~/jirafs`) in shell-safe way with explicit errors.
 
 ```bash
-bin_path="$(command -v fs-jira || true)"
+bin_path="$(command -v jirafs || true)"
 if [ -z "$bin_path" ]; then
-  echo "fs-jira binary not found; run just install" >&2
+  echo "jirafs binary not found; run just install" >&2
   exit 1
 fi
 ```
 
 #### 2. Add Linux recipes (`systemd --user`)
 **File**: `Justfile`
-**Changes**: Add Linux-specific recipes that render template to `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/fs-jira.service`, then run `systemctl --user` lifecycle commands.
+**Changes**: Add Linux-specific recipes that render template to `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/jirafs.service`, then run `systemctl --user` lifecycle commands.
 
 ```just
 service-enable:
     systemctl --user daemon-reload
-    systemctl --user enable --now fs-jira.service
+    systemctl --user enable --now jirafs.service
 ```
 
 #### 3. Add macOS recipes (`launchd`)
 **File**: `Justfile`
-**Changes**: Add macOS-specific recipes that render plist to `$HOME/Library/LaunchAgents/com.fs-jira.mount.plist`, then run `launchctl bootstrap/bootout/print`.
+**Changes**: Add macOS-specific recipes that render plist to `$HOME/Library/LaunchAgents/com.jirafs.mount.plist`, then run `launchctl bootstrap/bootout/print`.
 
 ```just
 service-status:
-    launchctl print gui/$(id -u)/com.fs-jira.mount
+    launchctl print gui/$(id -u)/com.jirafs.mount
 ```
 
 #### 4. Add safe idempotency and guardrails
@@ -157,7 +157,7 @@ service-status:
 - [ ] Existing quality gates still pass: `cargo fmt --check && cargo clippy --all-targets --all-features --locked -- -D warnings && cargo test --all-targets --all-features --locked`
 
 #### Manual Verification:
-- [ ] Default install flow mounts at `~/fs-jira` when no mountpoint argument is passed.
+- [ ] Default install flow mounts at `~/jirafs` when no mountpoint argument is passed.
 - [ ] `just service-status` shows a running unit/agent after enable.
 - [ ] `just service-logs` shows runtime startup lines (including mount path) from stderr-backed logs.
 - [ ] Re-running install with same inputs is predictable and does not create duplicate service names.
@@ -180,7 +180,7 @@ Document full operator workflow and service-specific caveats so setup is reprodu
 
 #### 2. Document path and environment behavior
 **File**: `README.md`
-**Changes**: Explain config resolution (`XDG_CONFIG_HOME`/`HOME`), default mountpoint (`~/fs-jira`), and recommendation to avoid `/tmp` for service mounts.
+**Changes**: Explain config resolution (`XDG_CONFIG_HOME`/`HOME`), default mountpoint (`~/jirafs`), and recommendation to avoid `/tmp` for service mounts.
 
 #### 3. Add troubleshooting runbook
 **File**: `README.md`
@@ -224,7 +224,7 @@ Add lightweight checks so service workflow regressions are caught early.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] CI validates template presence and command surface: `test -f deploy/systemd/fs-jira.service.tmpl && test -f deploy/launchd/com.fs-jira.mount.plist.tmpl && just --list`
+- [ ] CI validates template presence and command surface: `test -f deploy/systemd/jirafs.service.tmpl && test -f deploy/launchd/com.jirafs.mount.plist.tmpl && just --list`
 - [ ] Full project quality gates pass: `cargo fmt --check && cargo clippy --all-targets --all-features --locked -- -D warnings && cargo test --all-targets --all-features --locked`
 
 #### Manual Verification:
@@ -249,12 +249,12 @@ Add lightweight checks so service workflow regressions are caught early.
   - `just service-status`
   - `just service-disable`
   - `just service-uninstall`
-- Validate mount readability post-start (`ls ~/fs-jira`, `ls ~/fs-jira/workspaces`).
+- Validate mount readability post-start (`ls ~/jirafs`, `ls ~/jirafs/workspaces`).
 
 ### Manual Testing Steps:
-1. Run `just install` and confirm `fs-jira` is on `PATH`.
+1. Run `just install` and confirm `jirafs` is on `PATH`.
 2. Run `just service-install` with defaults and inspect rendered service file contents.
-3. Run `just service-enable`, then verify mount at `~/fs-jira` and read one issue markdown file.
+3. Run `just service-enable`, then verify mount at `~/jirafs` and read one issue markdown file.
 4. Restart user session and verify mount auto-returns.
 5. Run `just service-disable && just service-uninstall` and verify no active service remains.
 
@@ -268,7 +268,7 @@ Add lightweight checks so service workflow regressions are caught early.
 
 - Existing `just run` and raw `cargo run` workflows remain valid and unchanged.
 - Existing config files remain valid; service flow only standardizes startup transport.
-- Users currently mounting under `/tmp` can continue, but default service path is now `~/fs-jira` for stability across sessions.
+- Users currently mounting under `/tmp` can continue, but default service path is now `~/jirafs` for stability across sessions.
 
 ## References
 

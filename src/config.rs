@@ -99,7 +99,7 @@ pub struct AppConfigOverrides {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("config file not found at {path}. expected at $XDG_CONFIG_HOME/fs-jira/config.toml or ~/.config/fs-jira/config.toml")]
+    #[error("config file not found at {path}. expected at $XDG_CONFIG_HOME/jirafs/config.toml or ~/.config/jirafs/config.toml")]
     MissingConfigFile { path: PathBuf },
     #[error("failed to resolve config path: HOME is not set and XDG_CONFIG_HOME is unset")]
     MissingHomeDirectory,
@@ -154,7 +154,7 @@ fn resolve_config_path_from_env(
     home: Option<OsString>,
 ) -> Result<PathBuf, ConfigError> {
     if let Some(dir) = xdg_config_home.filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(dir).join("fs-jira").join("config.toml"));
+        return Ok(PathBuf::from(dir).join("jirafs").join("config.toml"));
     }
 
     let home = home
@@ -162,7 +162,7 @@ fn resolve_config_path_from_env(
         .ok_or(ConfigError::MissingHomeDirectory)?;
     Ok(PathBuf::from(home)
         .join(".config")
-        .join("fs-jira")
+        .join("jirafs")
         .join("config.toml"))
 }
 
@@ -287,7 +287,7 @@ mod tests {
         )
         .expect("xdg path should resolve");
 
-        assert_eq!(path, PathBuf::from("/tmp/xdg-home/fs-jira/config.toml"));
+        assert_eq!(path, PathBuf::from("/tmp/xdg-home/jirafs/config.toml"));
     }
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
         let path = resolve_config_path_from_env(None, Some(OsString::from("/tmp/home")))
             .expect("home path should resolve");
 
-        assert_eq!(path, PathBuf::from("/tmp/home/.config/fs-jira/config.toml"));
+        assert_eq!(path, PathBuf::from("/tmp/home/.config/jirafs/config.toml"));
     }
 
     #[test]
@@ -314,7 +314,7 @@ mod tests {
             [jira.workspaces]
 
             [cache]
-            db_path = "/tmp/fs-jira-cache.db"
+            db_path = "/tmp/jirafs-cache.db"
         "#;
 
         let cfg: AppConfig = toml::from_str(raw).expect("toml should parse");
@@ -334,7 +334,7 @@ mod tests {
             jql = "project = PROJ ORDER BY updated DESC"
 
             [cache]
-            db_path = "/tmp/fs-jira-cache.db"
+            db_path = "/tmp/jirafs-cache.db"
             ttl_secs = 0
 
             [sync]

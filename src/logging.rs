@@ -79,9 +79,9 @@ mod tests {
 
     #[test]
     fn redacts_cli_api_token() {
-        let input = "fs-jira --jira-api-token supersecret /tmp/mnt";
+        let input = "jirafs --jira-api-token supersecret /tmp/mnt";
         let output = redacted(input);
-        assert_eq!(output, "fs-jira --jira-api-token ***REDACTED*** /tmp/mnt");
+        assert_eq!(output, "jirafs --jira-api-token ***REDACTED*** /tmp/mnt");
     }
 
     #[test]
