@@ -1,8 +1,8 @@
-# Jirafs (pronounced Giraffes)
+# Jirafs (pronounced 'giraffes')
 
 Read-only Rust FUSE filesystem that exposes Jira issues as markdown files.
 
-<img src="apps/desktop/src-tauri/icons/icon.png" width="500" alt="Alt Text">
+<img src="apps/desktop/src-tauri/icons/icon.png" width="500" alt="Giraffe logo made of tickets">
 
 ## Prerequisites
 
